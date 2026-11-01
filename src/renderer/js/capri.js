@@ -12,6 +12,7 @@ import { ACTS, NEUTRAL, Player } from './acting.js';
 import { sleep, rand, pick, clamp, lerp, ease, tween, reducedMotion, today } from './util.js';
 
 const ON_TWOS = 1000 / 12;
+const LINUX = navigator.userAgent.includes('Linux');
 const ON_ONES = 1000 / 24;
 const ASLEEP = 1000 / 6;
 const SLEEP_AFTER = 10 * 60 * 1000;
@@ -406,7 +407,9 @@ export class Capri {
   // The top of the taskbar (the bottom of her screen), as a ledge to sit on like a window's: her
   // legs hang down behind it.
   ledge() {
-    return { id: 'taskbar', x: 0, y: this.view.floor, w: this.view.w, h: this.view.h - this.view.floor, max: false };
+    // Linux has no taskbar in front of her legs: up by their length, so all of her shows
+    const y = this.view.floor - (LINUX ? (SPRITE.feet.y - SPRITE.hip) * this.scale + 6 : 0);
+    return { id: 'taskbar', x: 0, y, w: this.view.w, h: this.view.h - y, max: false };
   }
 
   // What she's perched on, from its id: a window, or the taskbar.
@@ -433,11 +436,7 @@ export class Capri {
     }
     const front = options.find((o) => o.win.id === this.windows.fg);
     if (frontOnly) return front || null;
-    if (front || options[0]) return front || options[0];
-    // Linux, with windows that fill the screen: no top edge has room for her, so she sits on the
-    // bottom edge of the screen, her legs hanging out of it
-    if (!navigator.userAgent.includes('Linux') || except === 'taskbar') return null;
-    return { win: this.ledge(), dx: rand(this.view.w * 0.3, this.view.w * 0.85) };
+    return front || options[0] || null;
   }
 
   // ---------- frame loop ----------
@@ -561,14 +560,15 @@ export class Capri {
       this.gaze();
     }
 
-    if (this.mode === 'idle' && now - this.lastActivity > SLEEP_AFTER) this.setMode('sleep');
-    if (this.mode === 'sleep' && now - this.sleptAt > DOZE_AFTER) {
-      this.doze();
+    // first: asleep half off the screen, she'd stay there, cropped
+    if (this.stance === 'peek' && now > this.peekUntil) {
+      this.unpeek();
       return;
     }
 
-    if (this.stance === 'peek' && now > this.peekUntil) {
-      this.unpeek();
+    if (this.mode === 'idle' && now - this.lastActivity > SLEEP_AFTER) this.setMode('sleep');
+    if (this.mode === 'sleep' && now - this.sleptAt > DOZE_AFTER) {
+      this.doze();
       return;
     }
 
@@ -581,7 +581,7 @@ export class Capri {
     }
 
     if (this.mode === 'idle' && now > this.nextMove) {
-      this.nextMove = now + rand(25000, 70000);
+      this.nextMove = now + rand(15000, 40000);
       this.wanderStep();
     }
 
@@ -626,40 +626,11 @@ export class Capri {
     }
     const seat = this.pickSeat();
     const r = Math.random();
-    if (seat && r < 0.35) this.sitOn(seat);
-    else if (r < 0.5) this.peek();
-    else if (r < 0.75 && this.canGlide()) this.glide();
-    else if (r < 0.85) this.teleport(this.spot('random'));
+    if (seat && r < 0.3) this.sitOn(seat);
+    else if (!seat && r < 0.12 && this.canPossess()) this.possess();
+    else if (r < 0.42) this.peek();
+    else if (r < 0.6) this.teleport(this.spot('random'));
     else this.flourish();
-  }
-
-  canGlide() {
-    return navigator.userAgent.includes('Linux') && !reducedMotion.matches && !this.busy
-      && this.stance === 'stand' && Math.abs(this.pos.y - this.floor) < 2;
-  }
-
-  // She has no walk: she floats along the floor of the screen, in a slow bob, to somewhere else.
-  async glide(toX) {
-    if (!this.canGlide()) return;
-    const { w } = this.view;
-    const side = 150 * this.scale + 30;
-    const fromX = this.pos.x;
-    let x = toX ?? rand(side, w - side);
-    if (toX === undefined && Math.abs(x - fromX) < w * 0.2) x = clamp(w - x, side, w - side);
-    const ms = clamp(Math.abs(x - fromX) * 5, 1400, 5000);
-    this.busy = true;
-    this.facing = x < fromX ? 1 : -1;
-    const start = performance.now();
-    for (;;) {
-      const k = Math.min(1, (performance.now() - start) / ms);
-      const eased = k * k * (3 - 2 * k);
-      this.pos = { x: lerp(fromX, x, eased), y: this.floor - Math.sin(k * Math.PI) * 14 - Math.sin(k * Math.PI * 6) * 3 };
-      this.drawFrame();
-      if (k >= 1) break;
-      await sleep(ON_TWOS);
-    }
-    this.pos = { x, y: this.floor };
-    this.busy = false;
   }
 
   flourish() {
@@ -668,8 +639,8 @@ export class Capri {
       else this.getUp();
     } else if (this.stance === 'sit') {
       if (Math.random() < 0.3) this.lieDown();
-      else this.perform(pick(['look', 'look', 'split', 'stretch']));
-    } else this.perform(pick(['spin', 'look', 'hop', 'curious', 'split']), this.towardCenter());
+      else this.perform(pick(['look', 'look', 'split', 'stretch', 'huff', 'glare', 'curious']), this.towardCenter());
+    } else this.perform(pick(['spin', 'look', 'hop', 'curious', 'split', 'stretch', 'victory', 'huff', 'glare', 'shake', 'turn']), this.towardCenter());
   }
 
   // Bored on her ledge, she lies back on it: a little lean the other way, then she lets herself
@@ -1487,8 +1458,17 @@ export class Capri {
   }
 
   canPossess() {
-    return this.possessWindows && !this.busy && !this.hidden && this.stance === 'sit' && !reducedMotion.matches
-      && this.windows.wins.some((w) => w.id === this.perch?.id);
+    const placed = this.stance === 'sit' || (LINUX && this.stance === 'stand');
+    return this.possessWindows && !this.busy && !this.hidden && placed && !reducedMotion.matches
+      && Boolean(this.possessTarget());
+  }
+
+  // The window she'd dive into: the one she sits on. Standing (Linux, where windows that fill the
+  // screen leave her nowhere to sit), the one in front.
+  possessTarget() {
+    const { wins, fg } = this.windows;
+    if (this.stance === 'sit') return wins.find((w) => w.id === this.perch?.id) || null;
+    return wins.find((w) => w.id === fg) || wins[0] || null;
   }
 
   // The windows in front of window `id` (nothing of hers is drawn over those).
@@ -1508,9 +1488,9 @@ export class Capri {
   async possess({ say = '', angry = false } = {}) {
     if (!this.canPossess()) return false;
     const s = this.scale;
-    const id = this.perch.id;
-    const win = this.windows.wins.find((w) => w.id === id);
-    const entry = this.pos.x - win.x;
+    const win = this.possessTarget();
+    const { id } = win;
+    const entry = clamp(this.pos.x - win.x, 0, win.w);
     this.busy = true;
     this.wake();
     this.onTeleport?.('start');
@@ -1548,7 +1528,7 @@ export class Capri {
   }
 
   // Lean in from an edge of the screen: vanish, then slide in on twos, three drawings.
-  async peek(side = pick(['left', 'right', 'top'])) {
+  async peek(side = pick(LINUX ? ['left', 'right'] : ['left', 'right', 'top'])) { // Linux: the top is under your bar
     if (this.busy) return;
     const s = this.scale;
     const { w, h } = this.view;
@@ -1596,7 +1576,7 @@ export class Capri {
       }
     }
     this.peekFrom = from;
-    this.peekUntil = performance.now() + rand(15000, 40000);
+    this.peekUntil = performance.now() + (LINUX ? rand(7000, 16000) : rand(15000, 40000));
     this.busy = false;
     this.onTeleport?.('end');
   }

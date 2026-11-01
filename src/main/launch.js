@@ -325,16 +325,87 @@ function spotifyOpen(uri) {
   });
 }
 
-// Its search in the Spotify app, for you to pick the song: starting one needs Spotify's own API.
-async function spotify(query) {
-  return { title: null, spotify: true, opened: await spotifyOpen(`spotify:search:${encodeURIComponent(query)}`) };
+// Your Spotify developer app, from spotify.json next to her config: { "id": "...", "secret": "..." }.
+function spotifyKeys() {
+  try {
+    const keys = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'spotify.json'), 'utf8'));
+    return keys.id && keys.secret ? keys : null;
+  } catch {
+    return null;
+  }
 }
 
-// A song you asked for: in Spotify if you have the app on Linux, else the exact video on YouTube.
+let spotifyToken = null; // { value, until }
+async function spotifyAuth(keys) {
+  if (spotifyToken && Date.now() < spotifyToken.until) return spotifyToken.value;
+  const res = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: {
+      authorization: `Basic ${Buffer.from(`${keys.id}:${keys.secret}`).toString('base64')}`,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: 'grant_type=client_credentials',
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Spotify login: ${res.status}`);
+  const body = await res.json();
+  spotifyToken = { value: body.access_token, until: Date.now() + (body.expires_in - 60) * 1000 };
+  return spotifyToken.value;
+}
+
+// The track a song's name means, from Spotify's own search: of its first results, the one with the
+// most of your words in its artist and title, and at least half of them: { id, title }, or null.
+async function spotifyTrack(query, keys) {
+  const url = `https://api.spotify.com/v1/search?type=track&limit=5&q=${encodeURIComponent(query)}`;
+  const res = await fetch(url, { headers: { authorization: `Bearer ${await spotifyAuth(keys)}` }, signal: AbortSignal.timeout(8000) });
+  if (!res.ok) throw new Error(`Spotify search: ${res.status}`);
+  const asked = words(query);
+  let best = null;
+  for (const track of (await res.json()).tracks?.items || []) {
+    const title = `${track.artists?.map((a) => a.name).join(', ') || ''} - ${track.name}`.replace(/^ - /, '');
+    const has = new Set(words(title));
+    const score = asked.filter((w) => has.has(w)).length / (asked.length || 1);
+    if (!best || score > best.score) best = { id: track.id, title, score };
+  }
+  console.log(`[capri] spotify: "${query}" -> ${best ? `${best.title} (${Math.round(best.score * 100)}%)` : 'nothing'}`);
+  return best && best.score >= 0.5 ? best : null;
+}
+
+const spotifyCtl = (...args) => new Promise((resolve) => {
+  execFile('playerctl', ['-p', 'spotify', ...args], { timeout: 3000 }, (err, out) => resolve(err ? null : String(out).trim()));
+});
+
+// Starts it in the app: { title, spotify } once Spotify really is on that track, null if it can't.
+async function spotifyPlay(query) {
+  const keys = spotifyKeys();
+  const installed = await hasSpotify();
+  if (!keys || !installed) {
+    console.log(`[capri] spotify: not used (keys ${Boolean(keys)}, app ${installed})`);
+    return null;
+  }
+  const track = await spotifyTrack(query, keys).catch((err) => {
+    console.error('[capri] spotify:', err.message);
+    return null;
+  });
+  if (!track) return null;
+  const uri = `spotify:track:${track.id}`;
+  if ((await spotifyCtl('status')) === null) return (await spotifyOpen(uri)) ? { title: track.title, spotify: true } : null;
+  await spotifyCtl('open', uri);
+  for (let i = 0; i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 400));
+    if ((await spotifyCtl('metadata', 'mpris:trackid'))?.endsWith(track.id)) {
+      await spotifyCtl('play');
+      return { title: track.title, spotify: true };
+    }
+  }
+  return null;
+}
+
+// A song you asked for: started in Spotify if it's set up, else the exact video on YouTube.
 async function play(query) {
   const q = String(query || '').trim().slice(0, 200);
   if (!q) return null;
-  return !WIN && (await hasSpotify()) ? spotify(q) : youtube(q);
+  return (!WIN && (await spotifyPlay(q))) || youtube(q);
 }
 
 // A Spotify search for it: in the app if it's installed, else on the web.
@@ -342,7 +413,9 @@ async function music(query) {
   const q = String(query || '').trim().slice(0, 200);
   if (!q) return false;
   if (!WIN) {
-    if (await hasSpotify()) return (await spotify(q)).opened;
+    if (await spotifyPlay(q)) return true;
+    // Spotify's links write a space as +; "Artist - Song" searches better without the dash
+    if (await hasSpotify()) return spotifyOpen(`spotify:search:${encodeURIComponent(q.replace(/\s+-\s+/g, ' ')).replace(/%20/g, '+')}`);
     await youtube(q);
     return true;
   }
@@ -375,6 +448,7 @@ async function youtube(query) {
   } catch {
     // offline or YouTube changed its page: the search still opens
   }
+  if (!WIN) execFile('playerctl', ['-p', 'spotify', 'pause'], { timeout: 2000 }, () => {}); // not two songs at once
   await shell.openExternal(video ? `https://www.youtube.com/watch?v=${video.id}` : search);
   return { title: video?.title || null };
 }

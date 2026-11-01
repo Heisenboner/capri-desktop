@@ -48,7 +48,9 @@ const MEDIA_ACTIONS = new Set(MEDIA_ASK.map(([action]) => action));
 // "mets Bohemian Rhapsody sur YouTube", "play Daft Punk on youtube"
 const YOUTUBE_ASK = /(?:play|put on|put|mets|met|joue|lance|écoute|pon|toca|reproduce|coloca|bota|toque|включи|поставь)(?:[- ]moi|[- ]me|me)?\s+(.+?)\s+(?:on|sur|en|no|na|в)\s+youtube/i;
 // "mets Bohemian Rhapsody", "joue-moi du Daft Punk", "play some Queen": a song, or a game to play
-const PLAY_ASK = /^(?:capri,?\s+)?(?:mets|met|joue|play|put on|pon|toca|coloca|bota|toque|включи|поставь)(?:[- ]moi|[- ]me|me)?\s+(.{2,100})$/iu;
+// "okey honey play me X": asked for you, anywhere in the sentence
+const PLAY_ME = /(?:^|[\s,.!])(?:play|put on|включи|увімкни|ввімкни|постав|поставь|заграй|зіграй)\s+(?:me|мені|мне)\s+(.{2,100}?)[\s.!?]*$/iu;
+const PLAY_ASK = /^(?:(?:capri|choom|hey|hi|yo|ok|okay|okey|honey|babe|baby|so|now|well|just|please|pls|can you|could you|would you|будь ласка|можеш|можешь)[,\s]+)*(?:mets|met|joue|play|put on|pon|toca|coloca|bota|toque|включи|поставь|увімкни|ввімкни|включи|постав|грай|заграй|зіграй)(?:[- ]moi|[- ]me|me| мені| мне)?\s+(.{2,100}?)(?:[,\s]+(?:please|pls|будь ласка))?$/iu;
 // "joue à Brawlhalla", "play the game…": a game, not a song
 const GAME_ASK = /^(?:capri,?\s+)?(?:joue|play)\s+(?:à|au|aux|a|the game)\s/i;
 // "du Daft Punk", "some Queen": who to play, without the "some"
@@ -118,7 +120,7 @@ function robloxGame(text) {
   return name.length >= 2 ? name : null;
 }
 // "regarde mon écran", "tu vois quoi ?", "what's on my screen?", "что ты видишь?"
-const LOOK_ASK = /regarde (?:mon|l['’]|ce que)|(?:jette|jeter) un (?:œil|oeil)|tu vois quoi|qu['’]est[- ]ce que tu vois|look at (?:my|the|this) screen|what(?:'s| is) on my screen|what do you see|take a look|mira (?:mi|la) pantalla|qu[ée] ves|olha (?:minha|a) tela|o que voc[êe] v[êe]|посмотри на (?:мой )?экран|что ты видишь/i;
+const LOOK_ASK = /regarde (?:mon|l['’]|ce que)|(?:jette|jeter) un (?:œil|oeil)|tu vois quoi|qu['’]est[- ]ce que tu vois|look at (?:my|the|this) screen|what(?:'s| is) on my screen|what do you see|take a look|mira (?:mi|la) pantalla|qu[ée] ves|olha (?:minha|a) tela|o que voc[êe] v[êe]|посмотри на (?:мой )?экран|что ты видишь|(?:look|see|check|watch|view|read)\b.{0,25}\bscreen\b|(?:подивись|глянь|бачиш|дивись).{0,25}екран/i;
 // what her tag needs to find in your message before it does anything: a small model tags answers about
 // anything ("[[music: synthwave]]" under a film tip), and music and the media keys act right away
 const LISTEN = /[ée]cout|listen|escuch|\bouv(ir|e)\b|слуша|playlist|album|\b(play|joue|mets|pon|toca|coloca)\b|включи|поставь/i;
@@ -283,7 +285,8 @@ export class Chat {
     // line about it comes under her answer (Claude Code, answering her chat, does things its own way)
     const asked = this.agent ? null : this.asked(text);
     if (asked?.kind === 'look') return this.sendLook(text, id);
-    const early = asked && asked.kind !== 'close' ? this.doNow(asked) : null;
+    let early = asked && asked.kind !== 'close' ? this.doNow(asked) : null;
+    if (!asked && !this.agent) early = this.heardSong(text); // not a plain command: it may still be a song
     this.bond?.heard(text); // "sorry": she lets it go
     await Promise.race([this.appsReady, new Promise((r) => setTimeout(r, 1500))]);
     // what she greeted you with (angry, sulking…), in the conversation before your message, so her
@@ -435,13 +438,19 @@ export class Chat {
     const after = both?.[1];
     // "ouvre discord et lance spotify": the first half too
     if (after && !VAGUE_SONG.test(after) && !HER_PICK.test(after)) return { kind: 'play', song: songOf(after.replace(/[\s.!?]+$/, '')), before: text.trim().slice(0, both.index) };
-    const play = PLAY_ASK.exec(text.trim())?.[1];
+    const play = (PLAY_ASK.exec(text.trim()) || PLAY_ME.exec(text.trim()))?.[1];
     if (play && !VAGUE_SONG.test(play) && !HER_PICK.test(play)) return { kind: 'play', song: songOf(play.replace(/[\s.!?]+$/, '')) };
     if (OPEN_ASK.test(text) && count <= 14) return { kind: 'open', text };
     return null;
   }
 
   // Doing it now. Resolves with her line about it ({ line, face }), or null if there was nothing to do.
+  // Music asked for in your own words ("i wanna hear daft punk"): her AI reads what you meant.
+  async heardSong(text) {
+    const song = await this.host.wantsSong(text).catch(() => null);
+    return song ? this.youtube(song) : null;
+  }
+
   async doNow(asked) {
     const { t } = this;
     const custom = this.brain.custom;
@@ -546,7 +555,7 @@ export class Chat {
     this.zap();
     const res = await (onYoutube ? this.host.youtube(song) : this.host.play(song));
     if (!res) return null;
-    if (res.spotify) return res.opened ? { line: fmt(this.t.music, { song: res.title || song }), face: 'laugh' } : null;
+    if (res.spotify) return { line: fmt(this.t.music, { song: res.title }), face: 'laugh' };
     return { line: res.title ? fmt(this.t.youtube, { title: res.title }) : fmt(this.t.youtubeSearch, { song }), face: 'laugh' };
   }
 

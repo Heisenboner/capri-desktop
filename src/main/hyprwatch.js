@@ -144,7 +144,7 @@ function startHyprWatch({ overlay, onUpdate }) {
       if (front?.id !== id) front = { id, game: top ? gameOf(top.pid) : null };
       const ai = !top ? [] : AIS.filter(([, title, cls]) => title.test(top.title || '') || (cls && String(top.class).toLowerCase() === cls)).map(([key]) => key);
       last = {
-        fg: id, taskbar: false, ai, pages: [], dl: false, game: front.game, usb, plug,
+        fg: id, app: top ? String(top.class || '').toLowerCase().slice(0, 40) : null, taskbar: false, ai, pages: [], dl: false, game: front.game, usb, plug,
         wins: open.filter((c) => c.size[0] >= 200 && c.size[1] >= 120).slice(0, 40).map((c) => ({
           id: Number.parseInt(c.address, 16), x: c.at[0], y: c.at[1], w: c.size[0], h: c.size[1], max: c.fullscreen > 0,
         })),

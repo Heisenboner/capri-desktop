@@ -15,6 +15,7 @@ import { Look } from './look.js';
 import { Pc } from './pc.js';
 import { linesFor } from './lines.js';
 import { pick, fmt, reducedMotion } from './util.js';
+import { Reactions } from './reactions.js';
 
 const host = window.host;
 
@@ -396,12 +397,24 @@ async function boot() {
     if (chat.open || guide.running || panel.visible || capri.windows.wins[0]?.max) return;
     const line = (Math.random() < 0.75 ? await host.muse().catch(() => null) : null) || brain.idleLine();
     if (chat.open || guide.running || panel.visible || capri.stowed) return; // it took a moment
+    speakUp(line);
+    reactions.spoke();
+  };
+  const speakUp = (line) => {
     capri.wake();
     brain.say('idle', line, null, {
       face: pick(['calm', 'smug', 'aside', 'look']), hold: 6000,
       actions: [{ id: 'talk', label: brain.t.chat.talk }], onAction: () => chat.start(),
     });
   };
+  // ...and to what you do (reactions.js), never right after saying something anyway
+  const reactions = new Reactions({
+    capri, panel, chat, guide, host, active: () => performance.now() - lastMove,
+    speak: (line) => {
+      speakUp(line);
+      chatterAt = Math.max(chatterAt, performance.now() + CHATTER_MIN);
+    },
+  });
   setInterval(() => {
     const now = performance.now();
     if (now < chatterAt || !capri.wander || now - lastMove > CHATTER_THERE) return;
@@ -562,6 +575,7 @@ async function boot() {
     brain.onWindows(data);
     jealousy.onWindows(data);
     pc.onWindows(data);
+    reactions.onWindows(data);
   });
   // the windows as they are now: the watcher only speaks again when something changes
   host.windowsNow().then((data) => data && capri.setWindows(data));
@@ -816,6 +830,13 @@ async function boot() {
       case 'focus': // as if window `fg` had come to the front
         capri.windows = { ...capri.windows, fg: cmd.fg };
         brain.onWindows(capri.windows);
+        break;
+      case 'react': // --dev: a reaction, now
+        console.log('[react]', await reactions.fire(cmd.about));
+        break;
+      case 'reacted': // --dev: as if she hadn't said anything for a while
+        reactions.lastAt = -Infinity;
+        console.log('[react] front', JSON.stringify(reactions.front));
         break;
       case 'chatter': // --dev: what she says on her own, now
         await chatter();

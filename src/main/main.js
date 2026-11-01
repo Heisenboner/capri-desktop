@@ -704,17 +704,39 @@ async function cursorPoint() {
 
 // What she can bring up in what she says: the program in front (its name, never a window's title)
 // and the song playing.
+function nowPlaying() {
+  return new Promise((resolve) => {
+    execFile('playerctl', ['metadata', '--format', '{{status}}\t{{title}}\t{{artist}}'], { timeout: 1500 }, (err, out) => {
+      if (err) return resolve(null);
+      const [status, title, artist] = String(out).trim().split('\t');
+      return resolve({ status, title: title || '', artist: artist || '' });
+    });
+  });
+}
+
+// What just happened, for her to react to (reactions.js).
+function reactTo({ kind, app: name = '', title = '', artist = '', n = 0, hour = 0, minutes = 0 } = {}) {
+  const inApp = `"${String(name).slice(0, 40)}"`;
+  if (kind === 'app') return `I just switched to the app ${inApp}.`;
+  if (kind === 'song') return `The song just changed to "${String(title).slice(0, 80)}"${artist ? ` by ${String(artist).slice(0, 60)}` : ''}.`;
+  if (kind === 'skips') return `I keep skipping songs, ${Number(n)} in a row.`;
+  if (kind === 'late') return `It is ${Number(hour)} in the morning and I am still at my PC.`;
+  if (kind === 'stare') return `I have been in the app ${inApp} for ${Number(minutes)} minutes without leaving it.`;
+  return 'Something just happened.';
+}
+
 async function aware() {
   const front = hypr.available ? await hypr.json('activewindow').catch(() => null) : null;
-  const song = await new Promise((resolve) => {
-    execFile('playerctl', ['metadata', '--format', '{{status}}|{{title}}|{{artist}}'], { timeout: 1500 }, (err, out) => resolve(err ? '' : String(out).trim()));
-  });
-  const [status, title, artist] = song.split('|');
+  const { status, title, artist } = (await nowPlaying()) || {};
   const bits = [];
   if (front?.class && front.class !== 'capri-desktop') bits.push(`I am in the app "${String(front.class).slice(0, 40)}".`);
   if (status === 'Playing' && title) bits.push(`I am listening to "${title.slice(0, 80)}"${artist ? ` by ${artist.slice(0, 60)}` : ''}.`);
   return bits.length ? `${bits.join(' ')} You may mention this if it's fun. ` : '';
 }
+
+const WANTS_SONG = `You read one chat message and decide if the person is asking to hear music right now. Answer with JSON only, nothing else: {"song":"ARTIST - TITLE"} or {"song":null}.
+Give a song when they ask to play, put on, hear, or listen to music, in any language and any wording. Keep what they named, in its own words: an artist alone is fine. If they want music but name nothing, pick one real song that fits what they said: a real artist and title, never a description.
+Give null for anything else: talking about music, opinions on songs, questions, games, volume, pausing, skipping.`;
 
 function registerIpc() {
   const setClickable = (on) => {
@@ -899,12 +921,35 @@ function registerIpc() {
     return item && { ...item, risky: launch.risky(item) }; // a program or a script: behind a button
   });
   ipcMain.handle('apps:youtube', (_e, query) => launch.youtube(query).catch(() => null));
+  ipcMain.handle('apps:play', (_e, query) => launch.play(query).catch(() => null));
+  // Is this message asking to hear music, however it's worded? Her AI reads it: the song, or null.
+  ipcMain.handle('capri:wantsSong', async (_e, text) => {
+    const cfg = config.load();
+    const said = String(text || '').trim().slice(0, 300);
+    if (!said || cfg.provider === 'claude') return null;
+    if (!chatModels?.length) await refreshModels();
+    const model = pickModel(cfg);
+    if (!model) return null;
+    const messages = [
+      { role: 'system', content: WANTS_SONG },
+      { role: 'user', content: said },
+    ];
+    const raw = await llm.chat(cfg.provider, llmConfig(cfg), { model, messages }, () => {}, AbortSignal.timeout(8000)).catch(() => null);
+    try {
+      const song = JSON.parse(/\{[\s\S]*\}/.exec(String(raw))?.[0] ?? 'null')?.song;
+      return typeof song === 'string' && song.trim() ? song.trim().slice(0, 150) : null;
+    } catch {
+      return null;
+    }
+  });
   // something she says on her own: one line from her AI, in her persona. Nothing about you or your
   // screen goes out with it, beyond the app's name and the song in aware(), unless that's unticked.
   // null when it can't, and she uses one of her written lines.
-  ipcMain.handle('capri:muse', async () => {
+  ipcMain.handle('capri:nowPlaying', () => nowPlaying());
+  ipcMain.handle('capri:muse', async (_e, about) => {
     const cfg = config.load();
     if (cfg.provider === 'claude') return null; // a whole Claude Code session for one line: no
+    if (about && cfg.awareChat === false) return null; // reacting to what you do is what that turns off
     if (!chatModels?.length) await refreshModels();
     const model = pickModel(cfg);
     if (!model) return null;
@@ -912,13 +957,17 @@ function registerIpc() {
     const seeing = cfg.awareChat === false ? '' : await aware();
     const messages = [
       { role: 'system', content: persona },
-      { role: 'user', content: `Nobody asked you anything: you speak up on your own. ${seeing}Say one short thing to me, under 15 words, in character. A tease, a thought, a complaint that you are bored: something new, not a greeting. Only the line, no quotes, no tags.` },
+      {
+        role: 'user',
+        content: about
+          ? `${reactTo(about)} React to that in one short line, under 15 words, in character. Only the line, no quotes, no tags.`
+          : `Nobody asked you anything: you speak up on your own. ${seeing}Say one short thing to me, under 15 words, in character. A tease, a thought, a complaint that you are bored: something new, not a greeting. Only the line, no quotes, no tags.`,
+      },
     ];
     const text = await llm.chat(cfg.provider, llmConfig(cfg), { model, messages }, () => {}, AbortSignal.timeout(20000)).catch(() => null);
     const line = String(text || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\[\[[^\]]*\]\]/g, '').trim().replace(/^["“«]+|["”»]+$/g, '');
     return line && line.length <= 160 ? line : null;
   });
-  ipcMain.handle('apps:play', (_e, query) => launch.play(query).catch(() => null));
   ipcMain.handle('apps:roblox', (_e, query) => launch.roblox(query).catch(() => null));
   // your files (files.js): a search, opening what it found, a screenshot, a search on the web
   ipcMain.handle('files:search', (_e, query) => files.search(query).catch(() => []));
