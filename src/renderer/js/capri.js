@@ -433,7 +433,11 @@ export class Capri {
     }
     const front = options.find((o) => o.win.id === this.windows.fg);
     if (frontOnly) return front || null;
-    return front || options[0] || null;
+    if (front || options[0]) return front || options[0];
+    // Linux, with windows that fill the screen: no top edge has room for her, so she sits on the
+    // bottom edge of the screen, her legs hanging out of it
+    if (!navigator.userAgent.includes('Linux') || except === 'taskbar') return null;
+    return { win: this.ledge(), dx: rand(this.view.w * 0.3, this.view.w * 0.85) };
   }
 
   // ---------- frame loop ----------
@@ -623,9 +627,39 @@ export class Capri {
     const seat = this.pickSeat();
     const r = Math.random();
     if (seat && r < 0.35) this.sitOn(seat);
-    else if (r < 0.6) this.peek();
+    else if (r < 0.5) this.peek();
+    else if (r < 0.75 && this.canGlide()) this.glide();
     else if (r < 0.85) this.teleport(this.spot('random'));
     else this.flourish();
+  }
+
+  canGlide() {
+    return navigator.userAgent.includes('Linux') && !reducedMotion.matches && !this.busy
+      && this.stance === 'stand' && Math.abs(this.pos.y - this.floor) < 2;
+  }
+
+  // She has no walk: she floats along the floor of the screen, in a slow bob, to somewhere else.
+  async glide(toX) {
+    if (!this.canGlide()) return;
+    const { w } = this.view;
+    const side = 150 * this.scale + 30;
+    const fromX = this.pos.x;
+    let x = toX ?? rand(side, w - side);
+    if (toX === undefined && Math.abs(x - fromX) < w * 0.2) x = clamp(w - x, side, w - side);
+    const ms = clamp(Math.abs(x - fromX) * 5, 1400, 5000);
+    this.busy = true;
+    this.facing = x < fromX ? 1 : -1;
+    const start = performance.now();
+    for (;;) {
+      const k = Math.min(1, (performance.now() - start) / ms);
+      const eased = k * k * (3 - 2 * k);
+      this.pos = { x: lerp(fromX, x, eased), y: this.floor - Math.sin(k * Math.PI) * 14 - Math.sin(k * Math.PI * 6) * 3 };
+      this.drawFrame();
+      if (k >= 1) break;
+      await sleep(ON_TWOS);
+    }
+    this.pos = { x, y: this.floor };
+    this.busy = false;
   }
 
   flourish() {

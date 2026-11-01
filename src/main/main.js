@@ -15,6 +15,7 @@ const { TRAY, LANGS } = require('./labels');
 const { createBridge } = require('./bridge');
 const { startWindowWatch } = require('./windows');
 const hypr = require('./hyprland');
+const { execFile } = require('node:child_process');
 const llm = require('./llm');
 const ollama = require('./ollama');
 const setup = require('./setup');
@@ -425,6 +426,7 @@ function rebuildTray() {
       click: (item) => updateConfig({ closePages: item.checked }),
     },
     { label: t.pcReact, type: 'checkbox', checked: cfg.pcReact !== false, click: (item) => updateConfig({ pcReact: item.checked }) },
+    { label: t.awareChat, type: 'checkbox', checked: cfg.awareChat !== false, click: (item) => updateConfig({ awareChat: item.checked }) },
     {
       // she asks first (what she'll send where), then turns it on herself
       label: t.lookAuto, type: 'checkbox', checked: Boolean(cfg.watchScreen),
@@ -700,6 +702,20 @@ async function cursorPoint() {
   return p || screen.getCursorScreenPoint();
 }
 
+// What she can bring up in what she says: the program in front (its name, never a window's title)
+// and the song playing.
+async function aware() {
+  const front = hypr.available ? await hypr.json('activewindow').catch(() => null) : null;
+  const song = await new Promise((resolve) => {
+    execFile('playerctl', ['metadata', '--format', '{{status}}|{{title}}|{{artist}}'], { timeout: 1500 }, (err, out) => resolve(err ? '' : String(out).trim()));
+  });
+  const [status, title, artist] = song.split('|');
+  const bits = [];
+  if (front?.class && front.class !== 'capri-desktop') bits.push(`I am in the app "${String(front.class).slice(0, 40)}".`);
+  if (status === 'Playing' && title) bits.push(`I am listening to "${title.slice(0, 80)}"${artist ? ` by ${artist.slice(0, 60)}` : ''}.`);
+  return bits.length ? `${bits.join(' ')} You may mention this if it's fun. ` : '';
+}
+
 function registerIpc() {
   const setClickable = (on) => {
     if (hypr.available && !chatting) hypr.setFocusable(on).catch((err) => console.error('[capri] focus:', err.message));
@@ -884,7 +900,8 @@ function registerIpc() {
   });
   ipcMain.handle('apps:youtube', (_e, query) => launch.youtube(query).catch(() => null));
   // something she says on her own: one line from her AI, in her persona. Nothing about you or your
-  // screen goes out with it. null when it can't, and she uses one of her written lines.
+  // screen goes out with it, beyond the app's name and the song in aware(), unless that's unticked.
+  // null when it can't, and she uses one of her written lines.
   ipcMain.handle('capri:muse', async () => {
     const cfg = config.load();
     if (cfg.provider === 'claude') return null; // a whole Claude Code session for one line: no
@@ -892,9 +909,10 @@ function registerIpc() {
     const model = pickModel(cfg);
     if (!model) return null;
     const persona = [cfg.persona, cfg.userName && `The user's name is ${cfg.userName}.`].filter(Boolean).join('\n') || 'You are Capri, a playful digital construct on my desktop.';
+    const seeing = cfg.awareChat === false ? '' : await aware();
     const messages = [
       { role: 'system', content: persona },
-      { role: 'user', content: 'Nobody asked you anything: you speak up on your own. Say one short thing to me, under 15 words, in character. A tease, a thought, a complaint that you are bored: something new, not a greeting. Only the line, no quotes, no tags.' },
+      { role: 'user', content: `Nobody asked you anything: you speak up on your own. ${seeing}Say one short thing to me, under 15 words, in character. A tease, a thought, a complaint that you are bored: something new, not a greeting. Only the line, no quotes, no tags.` },
     ];
     const text = await llm.chat(cfg.provider, llmConfig(cfg), { model, messages }, () => {}, AbortSignal.timeout(20000)).catch(() => null);
     const line = String(text || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\[\[[^\]]*\]\]/g, '').trim().replace(/^["“«]+|["”»]+$/g, '');
