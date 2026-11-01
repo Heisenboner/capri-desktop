@@ -43,6 +43,21 @@ const setFocusable = (on) => dispatch(
   `hl.dsp.window.set_prop({ prop = "no_focus", value = "${on ? 0 : 1}", window = "class:capri-desktop" })`,
 );
 
+// Wayland doesn't let a window take the keyboard: Hyprland hands it over for her chat, and it goes
+// back to the window you were in once it closes.
+let before = null;
+async function takeKeyboard() {
+  const active = await json('activewindow').catch(() => null);
+  before = active?.class && active.class !== 'capri-desktop' ? active.address : null;
+  await setFocusable(true);
+  await dispatch('hl.dsp.focus({ window = "class:capri-desktop" })');
+}
+async function giveKeyboardBack() {
+  await setFocusable(false);
+  if (before) await dispatch(`hl.dsp.focus({ window = "address:${before}" })`);
+  before = null;
+}
+
 const closeWindow = (address) => dispatch(`hl.dsp.window.close({ window = "address:${address}" })`);
 
 // Hyprland's event stream, one onEvent(name) a line; it comes back by itself if the socket drops.
@@ -80,4 +95,4 @@ function capture({ x, y, width, height }) {
   });
 }
 
-module.exports = { available, ask, json, dispatch, cursor, setFocusable, closeWindow, events, capture };
+module.exports = { available, ask, json, dispatch, cursor, setFocusable, takeKeyboard, giveKeyboardBack, closeWindow, events, capture };

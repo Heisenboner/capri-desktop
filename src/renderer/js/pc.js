@@ -176,7 +176,9 @@ export class Pc {
   // a USB stick: she dives into it to have a look
   async stick(drive) {
     this.capri.wake();
-    this.say(fmt(pick(this.t.usb), { drive }), 'look', 2500);
+    // a drive letter takes a colon, E:, a Linux stick's name doesn't
+    const line = fmt(pick(this.t.usb), { drive });
+    this.say(navigator.userAgent.includes('Linux') ? line.replace(`${drive}:`, drive) : line, 'look', 2500);
     if (!this.quiet || !(await this.whenFree())) return;
     const { w, h } = this.capri.view;
     if (await this.capri.visit({ x: w - 140, y: h - 6 })) this.say(pick(this.t.usbBack), 'smug', 4500);

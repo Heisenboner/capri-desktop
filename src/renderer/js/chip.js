@@ -140,7 +140,9 @@ export class Mask extends Small {
 // ---------- put away ----------
 
 // bottom-left: the bottom-right corner is where the clock and the tray are, the pointer goes there all the time
+// (on Linux there's no such thing, the bar is wherever you put it: bottom-right, out of the way)
 const MARGIN = { left: 26, bottom: 22 };
+const ON_RIGHT = navigator.userAgent.includes('Linux');
 const K = 0.6;
 
 export class Chip extends Mask {
@@ -149,10 +151,11 @@ export class Chip extends Mask {
     this.mode = 'idle'; // hers: idle | work | alert | sleep
   }
 
-  // Bottom-left corner of a w x h screen.
+  // Bottom corner of a w x h screen.
   place(w, h) {
-    super.place(MARGIN.left + 50 * K, h - MARGIN.bottom - 54 * K, K);
-    this.face = { x: MARGIN.left + 50 * K, y: h - MARGIN.bottom - 54 * K };
+    const x = ON_RIGHT ? w - MARGIN.left - 50 * K : MARGIN.left + 50 * K;
+    super.place(x, h - MARGIN.bottom - 54 * K, K);
+    this.face = { x, y: h - MARGIN.bottom - 54 * K };
   }
 
   center() {

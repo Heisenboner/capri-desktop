@@ -258,7 +258,7 @@ She only catches the mouse on her actual body (pixel-precise): the rest of the s
 - **Drag** her: move her around. Let go mid-swing and she flies (see "Throw her").
 - **Click** the panel: it closes.
 - **Ctrl+Alt+C**: she puts herself away (into her biochip, like in the show) and all that's left of her is her mask,
-  eyes shut, in the bottom-left corner. Her eyes only open when Claude needs you. Click the mask (or Ctrl+Alt+C again)
+  eyes shut, in the bottom-left corner (bottom-right on Linux). Her eyes only open when Claude needs you. Click the mask (or Ctrl+Alt+C again)
   to bring her back.
 - **Her menu**: right-click her (it's also on her tray icon, next to the clock): teleport, look at the satellite, demo,
   how it works, mission report, talk to her, look at your screen, reminders, size, sound, screen (and following you across screens), AI

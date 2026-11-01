@@ -145,11 +145,19 @@ async function boot() {
   let onBack = null; // (away ms) => you're back at your PC after a while (the bond, below)
 
   // Linux/Hyprland: mouse moves don't reach a click-through window, so ask where the pointer is
+  let pointer = null;
   if (navigator.userAgent.includes('Linux')) {
     setInterval(async () => {
       if (capri.dragging) return;
       const at = await host.cursor().catch(() => null);
       if (!at) return;
+      // the pointer moved, anywhere: you're here (Windows gets this from the mouse hook)
+      if (at.x !== pointer?.x || at.y !== pointer?.y) {
+        const now = performance.now();
+        if (pointer && now - lastMove > AWAY_MS) onBack?.(now - lastMove);
+        lastMove = now;
+        pointer = { x: at.x, y: at.y };
+      }
       mouse = at.inside ? { x: at.x, y: at.y } : null;
       hoverChip();
       refreshHit();
@@ -376,6 +384,30 @@ async function boot() {
       panel.say({ kind: 'idle', face: 'look', line: pick(brain.t.bond.back), hold: 3500 });
     }, 700);
   };
+
+  // She speaks up on her own, every few minutes while you're at your PC: a line from her AI, or one
+  // of her written ones if it can't. Unticking Wander in her menu quiets this too.
+  const CHATTER_MIN = 3 * 60 * 1000;
+  const CHATTER_MAX = 7 * 60 * 1000;
+  const CHATTER_THERE = 5 * 60 * 1000; // the pointer moved this recently: you're there
+  let chatterAt = performance.now() + 60000;
+  const chatter = async () => {
+    if (capri.stowed || capri.hidden || capri.busy || capri.dragging || capri.mode === 'alert') return;
+    if (chat.open || guide.running || panel.visible || capri.windows.wins[0]?.max) return;
+    const line = (Math.random() < 0.75 ? await host.muse().catch(() => null) : null) || brain.idleLine();
+    if (chat.open || guide.running || panel.visible || capri.stowed) return; // it took a moment
+    capri.wake();
+    brain.say('idle', line, null, {
+      face: pick(['calm', 'smug', 'aside', 'look']), hold: 6000,
+      actions: [{ id: 'talk', label: brain.t.chat.talk }], onAction: () => chat.start(),
+    });
+  };
+  setInterval(() => {
+    const now = performance.now();
+    if (now < chatterAt || !capri.wander || now - lastMove > CHATTER_THERE) return;
+    chatterAt = now + CHATTER_MIN + Math.random() * (CHATTER_MAX - CHATTER_MIN);
+    chatter();
+  }, 15000);
 
   // A reminder due: she comes and finds you (on whichever screen you're on), and holds it up until
   // you say it's done or ask for ten more minutes. One that came due while she was off, she brings
@@ -784,6 +816,9 @@ async function boot() {
       case 'focus': // as if window `fg` had come to the front
         capri.windows = { ...capri.windows, fg: cmd.fg };
         brain.onWindows(capri.windows);
+        break;
+      case 'chatter': // --dev: what she says on her own, now
+        await chatter();
         break;
       case 'freeze':
         capri.hidden = Boolean(cmd.on);

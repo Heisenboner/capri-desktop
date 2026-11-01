@@ -62,7 +62,7 @@ function save(patch) {
   cache = { ...load(), ...patch };
   try {
     fs.mkdirSync(path.dirname(file()), { recursive: true });
-    fs.writeFileSync(file(), JSON.stringify(cache, null, 2));
+    fs.writeFileSync(file(), JSON.stringify(cache, null, 2), { mode: 0o600 }); // your API keys are in it
   } catch (err) {
     console.error('[capri] could not save config:', err.message);
   }

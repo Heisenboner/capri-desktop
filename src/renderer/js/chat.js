@@ -473,7 +473,7 @@ export class Chat {
       this.zap();
       return (await this.host.music(asked.song)) ? { line: fmt(t.music, { song: asked.song }), face: 'laugh' } : null;
     }
-    if (asked.kind === 'youtube') return this.youtube(asked.song);
+    if (asked.kind === 'youtube') return this.youtube(asked.song, { onYoutube: true });
     if (asked.kind === 'roblox') {
       this.zap();
       const res = await this.host.roblox(asked.game);
@@ -542,10 +542,11 @@ export class Chat {
   }
 
   // The song itself on YouTube (the right video, not a search), in your browser.
-  async youtube(song) {
+  async youtube(song, { onYoutube = false } = {}) {
     this.zap();
-    const res = await this.host.youtube(song);
+    const res = await (onYoutube ? this.host.youtube(song) : this.host.play(song));
     if (!res) return null;
+    if (res.spotify) return res.opened ? { line: fmt(this.t.music, { song: res.title || song }), face: 'laugh' } : null;
     return { line: res.title ? fmt(this.t.youtube, { title: res.title }) : fmt(this.t.youtubeSearch, { song }), face: 'laugh' };
   }
 
@@ -592,7 +593,7 @@ export class Chat {
     if (!value || !wanted(kind, text)) return undefined;
     if (kind === 'media') return MEDIA_ACTIONS.has(value.toLowerCase()) ? this.media(value.toLowerCase(), answer) : undefined;
     // a song she picked: on YouTube, the right video (on Spotify if that's what you said)
-    if (kind === 'music') return /spotify/i.test(text) ? this.music(value, answer) : this.playOn(value, answer);
+    if (kind === 'music') return /spotify/i.test(text) ? this.music(value, answer) : this.playOn(value, answer, /youtube/i.test(text));
     if (kind === 'site') return this.offerSite(value, answer);
     const item = await this.host.findLaunch(value);
     if (item) return this.launch(item, answer);
@@ -630,8 +631,8 @@ export class Chat {
     this.addLine(answer, res.ok ? fmt(t.opened, { app: this.nameOf(item) }) : `${t.failed} ${res.error}`, res.ok ? 'laugh' : 'aside');
   }
 
-  async playOn(song, answer) {
-    const done = await this.youtube(song);
+  async playOn(song, answer, onYoutube = false) {
+    const done = await this.youtube(song, { onYoutube });
     if (done) this.addLine(answer, done.line, done.face);
   }
 

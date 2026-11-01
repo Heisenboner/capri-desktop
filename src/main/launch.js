@@ -311,11 +311,41 @@ async function media(action) {
   ).then(() => true, () => false);
 }
 
+// Linux: is the Spotify app here?
+async function hasSpotify() {
+  return (await launchables()).some((i) => i.kind === 'app' && /^spotify$/i.test(i.name));
+}
+
+// Through the app itself: xdg-open can hand spotify: links to the browser.
+function spotifyOpen(uri) {
+  return new Promise((resolve) => {
+    const child = spawn('spotify', [`--uri=${uri}`], { detached: true, stdio: 'ignore' });
+    child.once('error', () => resolve(false));
+    child.once('spawn', () => { child.unref(); resolve(true); });
+  });
+}
+
+// Its search in the Spotify app, for you to pick the song: starting one needs Spotify's own API.
+async function spotify(query) {
+  return { title: null, spotify: true, opened: await spotifyOpen(`spotify:search:${encodeURIComponent(query)}`) };
+}
+
+// A song you asked for: in Spotify if you have the app on Linux, else the exact video on YouTube.
+async function play(query) {
+  const q = String(query || '').trim().slice(0, 200);
+  if (!q) return null;
+  return !WIN && (await hasSpotify()) ? spotify(q) : youtube(q);
+}
+
 // A Spotify search for it: in the app if it's installed, else on the web.
 async function music(query) {
   const q = String(query || '').trim().slice(0, 200);
   if (!q) return false;
-  if (!WIN) { await youtube(q); return true; } // Linux: no Spotify app, play it on YouTube
+  if (!WIN) {
+    if (await hasSpotify()) return (await spotify(q)).opened;
+    await youtube(q);
+    return true;
+  }
   try {
     await shell.openExternal(`spotify:search:${encodeURIComponent(q)}`);
   } catch {
@@ -389,4 +419,4 @@ async function site(address) {
   return true;
 }
 
-module.exports = { launchables, match, find, launch, media, music, youtube, roblox, site, siteUrl, risky };
+module.exports = { launchables, match, find, launch, media, music, play, youtube, roblox, site, siteUrl, risky };

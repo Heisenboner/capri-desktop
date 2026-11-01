@@ -40,6 +40,9 @@ protocol.registerSchemesAsPrivileged([
 let overlay = null;
 let tray = null;
 let trayMenu = null; // also what she opens when you right-click her
+let menuOpen = false; // her menu is up: she stays clickable under it
+let wantInteractive = false; // what she asked for meanwhile, for when it closes
+let chatting = false; // her chat has the keyboard: the pointer moving off her doesn't take it away
 let demoTimer = null;
 let windowWatch = null;
 // the watcher only speaks when something changes: the overlay asks for this when it (re)loads
@@ -148,7 +151,7 @@ function fitOverlay() {
 // doesn't answer in time without a word (waking from sleep, a locked screen, a stall): she can't be
 // clicked anymore. Off then on puts in a new one; her place on top and her size are set again too.
 function rearmOverlay() {
-  if (!overlay || overlay.isDestroyed()) return;
+  if (!overlay || overlay.isDestroyed() || menuOpen) return;
   overlay.setIgnoreMouseEvents(false);
   overlay.setIgnoreMouseEvents(true, { forward: true });
   overlay.setAlwaysOnTop(true, 'screen-saver');
@@ -247,11 +250,12 @@ function playDemo() {
 // During the demo, a little fake terminal for her to sit on and take over (window tracking is
 // Windows only, so only there). Opened without stealing focus; closing it drops her off it.
 let demoWin = null;
+const PROMPT = process.platform === 'win32' ? 'PS C:\\night-city-api&gt;' : '~/night-city-api $';
 const DEMO_TERMINAL = `<body style="margin:0;background:#14101c;color:#8f8aa3;font:13px/1.7 Consolas,monospace;padding:14px 18px">
-<div style="color:#36ff7a">PS C:\\night-city-api&gt; npm test -- gigs</div>
+<div style="color:#36ff7a">${PROMPT} npm test -- gigs</div>
 <div>&nbsp;&nbsp;GET /gigs</div><div style="color:#36ff7a">&nbsp;&nbsp;&nbsp;&nbsp;✓ returns 20 items per page</div>
 <div style="color:#36ff7a">&nbsp;&nbsp;&nbsp;&nbsp;✓ paginates with a cursor</div><div style="color:#36ff7a">&nbsp;&nbsp;&nbsp;&nbsp;✓ rejects a bad cursor</div>
-<div>&nbsp;&nbsp;6 passing (212ms)</div><div style="color:#36ff7a">PS C:\\night-city-api&gt; _</div></body>`;
+<div>&nbsp;&nbsp;6 passing (212ms)</div><div style="color:#36ff7a">${PROMPT} _</div></body>`;
 
 function demoWindow(open) {
   demoWin?.destroy();
@@ -697,9 +701,13 @@ async function cursorPoint() {
 }
 
 function registerIpc() {
-  ipcMain.on('overlay:interactive', (_e, on) => {
-    if (hypr.available) hypr.setFocusable(on).catch((err) => console.error('[capri] focus:', err.message));
+  const setClickable = (on) => {
+    if (hypr.available && !chatting) hypr.setFocusable(on).catch((err) => console.error('[capri] focus:', err.message));
     overlay?.setIgnoreMouseEvents(!on, { forward: true });
+  };
+  ipcMain.on('overlay:interactive', (_e, on) => {
+    wantInteractive = on;
+    if (!menuOpen) setClickable(on); // the pointer going over her menu isn't the pointer leaving her
   });
   ipcMain.on('overlay:rearm', () => rearmOverlay()); // the pointer moved over her and she never heard of it
   ipcMain.handle('overlay:cursor', async () => {
@@ -730,7 +738,18 @@ function registerIpc() {
   ipcMain.handle('config:set', (_e, patch) => updateConfig(patch));
   ipcMain.handle('demo:window', (_e, open) => demoWindow(open));
   // right-clicking her: the same menu as the tray icon (which Windows often hides behind the ^ by the clock)
-  ipcMain.on('menu:open', () => trayMenu?.popup({ window: overlay }));
+  ipcMain.on('menu:open', () => {
+    if (!trayMenu) return;
+    menuOpen = true;
+    setClickable(true);
+    trayMenu.popup({
+      window: overlay,
+      callback: () => {
+        menuOpen = false;
+        setClickable(wantInteractive);
+      },
+    });
+  });
   // her welcome panel's buttons
   ipcMain.handle('hooks:install', () => runHooks('install', { quiet: true }));
   ipcMain.handle('claude:found', () => fs.existsSync(path.dirname(activeHooks().status().file))); // Claude Code keeps its settings there
@@ -864,6 +883,24 @@ function registerIpc() {
     return item && { ...item, risky: launch.risky(item) }; // a program or a script: behind a button
   });
   ipcMain.handle('apps:youtube', (_e, query) => launch.youtube(query).catch(() => null));
+  // something she says on her own: one line from her AI, in her persona. Nothing about you or your
+  // screen goes out with it. null when it can't, and she uses one of her written lines.
+  ipcMain.handle('capri:muse', async () => {
+    const cfg = config.load();
+    if (cfg.provider === 'claude') return null; // a whole Claude Code session for one line: no
+    if (!chatModels?.length) await refreshModels();
+    const model = pickModel(cfg);
+    if (!model) return null;
+    const persona = [cfg.persona, cfg.userName && `The user's name is ${cfg.userName}.`].filter(Boolean).join('\n') || 'You are Capri, a playful digital construct on my desktop.';
+    const messages = [
+      { role: 'system', content: persona },
+      { role: 'user', content: 'Nobody asked you anything: you speak up on your own. Say one short thing to me, under 15 words, in character. A tease, a thought, a complaint that you are bored: something new, not a greeting. Only the line, no quotes, no tags.' },
+    ];
+    const text = await llm.chat(cfg.provider, llmConfig(cfg), { model, messages }, () => {}, AbortSignal.timeout(20000)).catch(() => null);
+    const line = String(text || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\[\[[^\]]*\]\]/g, '').trim().replace(/^["“«]+|["”»]+$/g, '');
+    return line && line.length <= 160 ? line : null;
+  });
+  ipcMain.handle('apps:play', (_e, query) => launch.play(query).catch(() => null));
   ipcMain.handle('apps:roblox', (_e, query) => launch.roblox(query).catch(() => null));
   // your files (files.js): a search, opening what it found, a screenshot, a search on the web
   ipcMain.handle('files:search', (_e, query) => files.search(query).catch(() => []));
@@ -881,7 +918,12 @@ function registerIpc() {
   // typing to her: the overlay takes the keyboard while the chat is open, and gives it back after
   ipcMain.on('overlay:focus', (_e, on) => {
     if (!overlay) return;
+    chatting = Boolean(on);
     overlay.setFocusable(Boolean(on));
+    if (hypr.available) {
+      (on ? hypr.takeKeyboard() : hypr.giveKeyboardBack()).catch((err) => console.error('[capri] keyboard:', err.message));
+      return;
+    }
     if (on) overlay.focus();
     else overlay.blur();
   });

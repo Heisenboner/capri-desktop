@@ -350,8 +350,8 @@ export class Capri {
         return { x: w - side - 30, y: this.floor };
       case 'stage':
         return { x: w * 0.5 + rand(-w * 0.12, w * 0.12), y: this.floor };
-      case 'chip': // next to her biochip, bottom left
-        return { x: side + 30, y: this.floor };
+      case 'chip': // next to her biochip, in its corner
+        return { x: navigator.userAgent.includes('Linux') ? w - side - 30 : side + 30, y: this.floor };
       default: {
         const y = Math.random() < 0.65 ? this.floor : rand(SPRITE.height * s + 200, this.floor);
         let x = rand(side, w - side);

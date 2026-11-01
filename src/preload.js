@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('host', {
   media: (action) => ipcRenderer.invoke('apps:media', action),
   music: (query) => ipcRenderer.invoke('apps:music', query),
   youtube: (query) => ipcRenderer.invoke('apps:youtube', query),
+  play: (query) => ipcRenderer.invoke('apps:play', query),
+  muse: () => ipcRenderer.invoke('capri:muse'),
   roblox: (query) => ipcRenderer.invoke('apps:roblox', query),
   searchFiles: (query) => ipcRenderer.invoke('files:search', query),
   openFile: (file, reveal) => ipcRenderer.invoke('files:open', { file, reveal }),
