@@ -143,6 +143,19 @@ async function boot() {
   };
   let lastMove = performance.now();
   let onBack = null; // (away ms) => you're back at your PC after a while (the bond, below)
+
+  // Linux/Hyprland: mouse moves don't reach a click-through window, so ask where the pointer is
+  if (navigator.userAgent.includes('Linux')) {
+    setInterval(async () => {
+      if (capri.dragging) return;
+      const at = await host.cursor().catch(() => null);
+      if (!at) return;
+      mouse = at.inside ? { x: at.x, y: at.y } : null;
+      hoverChip();
+      refreshHit();
+    }, 60);
+  }
+
   window.addEventListener('mousemove', (e) => {
     const now = performance.now();
     if (now - lastMove > AWAY_MS) onBack?.(now - lastMove);

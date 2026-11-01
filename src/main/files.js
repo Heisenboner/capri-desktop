@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { app, shell, desktopCapturer, screen } = require('electron');
 const { powershell } = require('./apps');
+const hypr = require('./hyprland');
 
 const LIMIT = 8;
 const found = new Set(); // what a search showed you: the only paths she opens from here
@@ -24,6 +25,7 @@ const CODE = ['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'json', 'map', 'lock', 'ym
 // Windows Search: names first (every word in the name, of one of `exts` if any), then what's in
 // documents (not code). null if the index can't be asked.
 async function indexed(terms, exts) {
+  if (process.platform !== 'win32') return null; // the walk below
   const safe = terms.map((t) => t.replace(/[^\p{L}\p{N}.]/gu, '')).filter(Boolean);
   const types = exts.map((e) => e.replace(/[^a-z0-9]/gi, '')).filter(Boolean);
   if (!safe.length && !types.length) return [];
@@ -50,7 +52,10 @@ async function indexed(terms, exts) {
 
 // The walk, when the index isn't there: your usual folders, a few levels down, by name and type.
 function walked(terms, exts) {
-  const roots = ['desktop', 'documents', 'downloads', 'pictures', 'music', 'videos'].map((k) => app.getPath(k));
+  // Linux: your whole home, its folders aren't always the usual ones (hidden ones are skipped below)
+  const roots = process.platform === 'win32'
+    ? ['desktop', 'documents', 'downloads', 'pictures', 'music', 'videos'].map((k) => app.getPath(k))
+    : [app.getPath('home')];
   const onedrive = process.env.OneDrive;
   if (onedrive) roots.push(onedrive);
   const hits = [];
@@ -112,19 +117,24 @@ async function open(file, { reveal = false } = {}) {
   if (err) throw new Error(err);
 }
 
-// A screenshot of the screen she's on, full size, saved in Pictures › Screenshots (made if needed).
-async function screenshot(display) {
-  const d = display || screen.getPrimaryDisplay();
+async function capturePng(d) {
   const k = d.scaleFactor || 1;
   const size = { width: Math.round(d.bounds.width * k), height: Math.round(d.bounds.height * k) };
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
   const src = sources.find((s) => s.display_id === String(d.id)) || sources[0];
   if (!src || src.thumbnail.isEmpty()) throw new Error('no picture of the screen');
+  return src.thumbnail.toPNG();
+}
+
+// A screenshot of the screen she's on, full size, saved in Pictures › Screenshots (made if needed).
+async function screenshot(display) {
+  const d = display || screen.getPrimaryDisplay();
+  const png = hypr.available ? await hypr.capture(d.bounds) : await capturePng(d);
   const dir = path.join(app.getPath('pictures'), 'Screenshots');
   fs.mkdirSync(dir, { recursive: true });
   const stamp = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
   const file = path.join(dir, `Capri ${stamp}.png`);
-  fs.writeFileSync(file, src.thumbnail.toPNG());
+  fs.writeFileSync(file, png);
   found.add(file);
   return { path: file, name: path.basename(file) };
 }

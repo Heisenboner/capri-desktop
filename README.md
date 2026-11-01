@@ -99,8 +99,8 @@ glitches, comments on every action, comes to find you when it needs your permiss
 
 ![Asleep down to her mask, waking up, and put away bottom left](docs/sleep.png)
 
-Window tracking is Windows-only for now (a tiny PowerShell helper reads window positions, never their contents; the title of the one in front is only used to spot another AI, see "She gets attached", and its program's folder to tell a game; the USB sticks plugged in are seen by their drive letter, other devices by the name Windows gives them).
-On macOS and Linux she still floats, peeks, falls and wanders.
+Window tracking works on Windows and on Linux with Hyprland (on Windows, a tiny PowerShell helper reads window positions, never their contents; the title of the one in front is only used to spot another AI, see "She gets attached", and its program's folder to tell a game; the USB sticks plugged in are seen by their drive letter, other devices by the name Windows gives them).
+On Hyprland the same snapshot comes from Hyprland's own socket, with the same rules: no contents, and titles are only matched against the AI names. She doesn't close your other AIs' pages there, she only glares. On macOS and other Linux desktops she still floats, peeks, falls and wanders.
 
 ### She shows you around
 
@@ -385,7 +385,7 @@ named like this (`.mp3`, `.wav`, `.ogg` or `.m4a`):
 
 ## FAQ
 
-- **Mac, Linux?** No installer yet, but you can run her from the source (see above).
+- **Mac, Linux?** No installer yet, but you can run her from the source (see above). On Hyprland, install `grim`, `playerctl`, `gtk3` and `wireplumber`, float and pin her with a window rule, and bind a key to `electron . --toggle` (Wayland has no global shortcuts for apps).
 - **Phone, Android?** No, she needs a desktop.
 - **Other assistants?** Claude Code, Codex and Antigravity: her menu › **Watch**. Cursor, Windsurf and Gemini CLI: not yet.
 - **Ollama?** Two ways. Claude Code running on a local model through Ollama (`ollama launch claude`): she sees it like
@@ -485,7 +485,8 @@ tools/build-sprite.py    rebuilds the sprite from the original cut-out (Python +
 tools/build-cutins.py    cuts the cut-ins and her faces out of frames of the show
 tools/build-intro.py     cuts her intro's close-ups out of their background, all the same way
 src/main/                Electron: full-screen transparent click-through window, tray, local HTTP bridge
-  windows.js / .ps1      where the other windows are (Windows only), so she can sit on them
+  windows.js / .ps1      where the other windows are (Windows), so she can sit on them
+  hyprland.js, hyprwatch.js  the same on Hyprland, plus the pointer and screenshots (grim)
   ollama.js              her chat: the local model through Ollama, or one of its cloud models
   apps.js                closing an app you asked her to close (after your click)
 src/renderer/js/

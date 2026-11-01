@@ -14,6 +14,7 @@ const config = require('./config');
 const { TRAY, LANGS } = require('./labels');
 const { createBridge } = require('./bridge');
 const { startWindowWatch } = require('./windows');
+const hypr = require('./hyprland');
 const llm = require('./llm');
 const ollama = require('./ollama');
 const setup = require('./setup');
@@ -255,7 +256,7 @@ const DEMO_TERMINAL = `<body style="margin:0;background:#14101c;color:#8f8aa3;fo
 function demoWindow(open) {
   demoWin?.destroy();
   demoWin = null;
-  if (!open || process.platform !== 'win32') return false;
+  if (!open || (process.platform !== 'win32' && !hypr.available)) return false;
   const b = overlay.getBounds();
   demoWin = new BrowserWindow({
     x: Math.round(b.x + b.width * 0.5 - 310), y: Math.round(b.y + b.height * 0.42), width: 620, height: 300,
@@ -482,12 +483,13 @@ function rebuildTray() {
         label, type: 'radio', checked: cfg.lang === lang, click: () => updateConfig({ lang }),
       })),
     },
-    {
+    // Linux: Electron can't do this one, your compositor's config starts her
+    ...(process.platform === 'linux' ? [] : [{
       label: t.startup,
       type: 'checkbox',
       checked: app.getLoginItemSettings(loginItemOptions()).openAtLogin,
       click: (item) => app.setLoginItemSettings({ ...loginItemOptions(), openAtLogin: item.checked }),
-    },
+    }]),
     // her hooks, while she watches Claude Code
     ...(cfg.claude ? [
       { type: 'separator' },
@@ -617,6 +619,11 @@ async function snapScreen() {
   const k = d.scaleFactor || 1;
   const fit = Math.min(1, 1280 / (d.bounds.width * k));
   const size = { width: Math.round(d.bounds.width * k * fit), height: Math.round(d.bounds.height * k * fit) };
+  if (hypr.available) {
+    const shot = nativeImage.createFromBuffer(await hypr.capture(d.bounds));
+    if (shot.isEmpty()) throw new Error('no picture of the screen');
+    return shot.resize(size).toJPEG(72).toString('base64');
+  }
   const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: size });
   const src = sources.find((s) => s.display_id === String(d.id)) || sources[0];
   if (!src || src.thumbnail.isEmpty()) throw new Error('no picture of the screen');
@@ -683,13 +690,20 @@ function createTray() {
   rebuildTray();
 }
 
+// Hyprland: Electron doesn't see the cursor outside its window, so ask Hyprland
+async function cursorPoint() {
+  const p = hypr.available ? await hypr.cursor().catch(() => null) : null;
+  return p || screen.getCursorScreenPoint();
+}
+
 function registerIpc() {
   ipcMain.on('overlay:interactive', (_e, on) => {
+    if (hypr.available) hypr.setFocusable(on).catch((err) => console.error('[capri] focus:', err.message));
     overlay?.setIgnoreMouseEvents(!on, { forward: true });
   });
   ipcMain.on('overlay:rearm', () => rearmOverlay()); // the pointer moved over her and she never heard of it
-  ipcMain.handle('overlay:cursor', () => {
-    const p = screen.getCursorScreenPoint();
+  ipcMain.handle('overlay:cursor', async () => {
+    const p = await cursorPoint();
     const b = overlay.getBounds();
     const inside = p.x >= b.x && p.y >= b.y && p.x < b.x + b.width && p.y < b.y + b.height;
     return { x: p.x - b.x, y: p.y - b.y, inside, display: displayAt(p).id };
@@ -1034,7 +1048,8 @@ function main() {
     app.quit();
     return;
   }
-  app.on('second-instance', () => sendCommand('status'));
+  // started again: she says how things are; with --toggle (a compositor's key), she folds away or comes back
+  app.on('second-instance', (_e, argv) => (argv.includes('--toggle') ? toggleVisible() : sendCommand('status')));
   if (process.platform === 'win32') app.setAppUserModelId('capri.desktop');
 
   app.whenReady().then(() => {
@@ -1058,7 +1073,8 @@ function main() {
       onEvent: (evt) => !llm.isChatSession(evt.session_id) && overlay?.webContents.send('claude:event', evt),
       onDebug: DEV ? debugHandler : null,
     });
-    globalShortcut.register('Control+Alt+C', () => toggleVisible());
+    // Wayland has no such thing as a global shortcut for an app: on Hyprland it's a bind to --toggle
+    if (!hypr.available) globalShortcut.register('Control+Alt+C', () => toggleVisible());
     llm.restoreClaude(readMemory().claude);
     refreshModels(); // for her menu's model list
     setTimeout(() => launch.launchables().catch(() => {}), 20000); // what she can open, before you ask

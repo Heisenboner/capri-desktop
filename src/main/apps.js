@@ -2,15 +2,17 @@
 
 // Closing an app when you ask her to (chat.js), after you've confirmed with a click. The apps with
 // a window, by name; closing one the way its own close button does (it can still ask you to save),
-// and only if you ask again, forcing it. Windows only.
+// and only if you ask again, forcing it. Windows, and Hyprland through its window list.
 
 const { execFile } = require('node:child_process');
+const hypr = require('./hyprland');
 
 // never these: the desktop itself, Windows' own pieces, her (Capri), Claude (she watches it) and
 // Ollama (she talks through it)
 const KEEP = new Set([
   'explorer', 'applicationframehost', 'textinputhost', 'shellexperiencehost', 'startmenuexperiencehost',
   'searchhost', 'searchapp', 'lockapp', 'dwm', 'capri', 'electron', 'claude', 'codex', 'ollama', 'ollama app',
+  'capri-desktop', 'waybar',
 ]);
 
 function powershell(script, timeout = 15000) {
@@ -24,6 +26,7 @@ function powershell(script, timeout = 15000) {
 
 // [{ name, process, ids }]: one per program with a window open ("AM Music", "Discord"...)
 async function list() {
+  if (hypr.available) return hyprList();
   if (process.platform !== 'win32') return [];
   const out = await powershell(
     'Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } | '
@@ -40,6 +43,22 @@ async function list() {
   }
   return [...apps.values()];
 }
+
+// The same from Hyprland: a program is a window class; `windows` are what closes it there.
+async function hyprList() {
+  const apps = new Map();
+  for (const c of await hypr.json('clients')) {
+    const name = c.initialClass || c.class;
+    if (!name || !c.mapped || c.pid === process.pid || KEEP.has(name.toLowerCase())) continue;
+    const app = apps.get(name) || { name, process: name, label: c.initialTitle || '', ids: [], windows: [] };
+    if (!app.ids.includes(c.pid)) app.ids.push(c.pid);
+    app.windows.push(c.address);
+    apps.set(name, app);
+  }
+  return [...apps.values()];
+}
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const simple = (text) => String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
@@ -64,6 +83,21 @@ async function find(wanted) {
 async function close(name, { force = false } = {}) {
   const app = (await list()).find((a) => a.process === name);
   if (!app) return { running: false };
+  if (hypr.available) {
+    if (force) {
+      for (const pid of app.ids) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // already gone
+        }
+      }
+    } else {
+      await Promise.all(app.windows.map((address) => hypr.closeWindow(address)));
+    }
+    await wait(force ? 600 : 2500);
+    return { running: (await list()).some((a) => a.process === name) };
+  }
   const ids = app.ids.join(',');
   const out = await powershell(force
     ? `Stop-Process -Id ${ids} -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 600; `

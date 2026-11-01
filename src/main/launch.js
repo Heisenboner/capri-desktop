@@ -2,9 +2,11 @@
 
 // Opening things when you ask her to (chat.js): an app from the Start menu (Store apps like Spotify
 // included), a Steam or Epic game, your music (the media keys: pause, next…, so it works with
-// Spotify and most players), a Spotify search, or a website. Windows only.
+// Spotify and most players), a Spotify search, or a website. On Linux the apps come from their
+// .desktop files, and the music keys from playerctl and wpctl.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
@@ -27,7 +29,6 @@ const words = (text) => plain(text).split(/[^\p{L}\p{N}]+/u).filter((w) => w.len
 // Everything she can open: [{ name, kind: 'app' | 'steam' | 'epic', id }]
 async function launchables() {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.items;
-  if (!WIN) return [];
   const items = [];
   const seen = new Set();
   const add = (item) => {
@@ -36,6 +37,12 @@ async function launchables() {
     seen.add(key);
     items.push(item);
   };
+  if (!WIN) {
+    for (const game of steamGames(await steamRoot())) add(game);
+    for (const entry of desktopEntries()) add(entry);
+    cache = { at: Date.now(), items };
+    return items;
+  }
   // games first: a game's own entry wins over a shortcut to it
   for (const game of [...steamGames(await steamRoot()), ...epicGames()]) add(game);
   // the Start menu's list is slow the first time (PowerShell starting cold): main.js asks for it early
@@ -47,7 +54,48 @@ async function launchables() {
   return items;
 }
 
+// Linux: the apps of your menus, from their .desktop files; your own come first and hide the system's.
+function desktopEntries() {
+  const home = os.homedir();
+  const own = process.env.XDG_DATA_HOME || path.join(home, '.local', 'share');
+  const shared = (process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':');
+  const flatpak = [path.join(own, 'flatpak', 'exports', 'share'), '/var/lib/flatpak/exports/share'];
+  const seen = new Set();
+  const entries = [];
+  for (const dir of [own, ...shared, ...flatpak]) {
+    const apps = path.join(dir, 'applications');
+    let files = [];
+    try {
+      files = fs.readdirSync(apps).filter((f) => f.endsWith('.desktop'));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      const id = file.slice(0, -'.desktop'.length);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      try {
+        const main = fs.readFileSync(path.join(apps, file), 'utf8').split(/^\[(?!Desktop Entry\])/m)[0];
+        const field = (key) => new RegExp(`^${key}=(.*)$`, 'm').exec(main)?.[1].trim();
+        if (field('Type') !== 'Application' || field('NoDisplay') === 'true' || field('Hidden') === 'true') continue;
+        if (field('Name')) entries.push({ name: field('Name'), kind: 'app', id });
+      } catch {
+        // unreadable: skip it
+      }
+    }
+  }
+  return entries;
+}
+
 function steamRoot() {
+  if (!WIN) {
+    const home = os.homedir();
+    const roots = [
+      path.join(home, '.local', 'share', 'Steam'), path.join(home, '.steam', 'steam'),
+      path.join(home, '.var', 'app', 'com.valvesoftware.Steam', '.local', 'share', 'Steam'),
+    ];
+    return Promise.resolve(roots.find((r) => fs.existsSync(path.join(r, 'steamapps'))) || null);
+  }
   return new Promise((resolve) => {
     execFile('reg.exe', ['query', 'HKCU\\Software\\Valve\\Steam', '/v', 'SteamPath'], { windowsHide: true, timeout: 5000 }, (err, out) => {
       const found = !err && /SteamPath\s+REG_SZ\s+(.+)/.exec(String(out))?.[1].trim();
@@ -152,7 +200,16 @@ function desktopItems() {
 
 // files that run something: never opened without a click, even named by you
 const RUNS = /\.(exe|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|msi|msp|reg|scr|com|jar|hta|cpl|pif)$/i;
-const risky = (item) => item?.kind === 'file' && RUNS.test(item.id);
+// ...and on Linux these, or anything marked as a program
+const RUNS_LINUX = /\.(sh|bash|zsh|fish|py|pl|rb|lua|desktop|appimage|run|bin|deb|rpm|zst)$/i;
+function marked(file) {
+  try {
+    return (fs.statSync(file).mode & 0o111) !== 0;
+  } catch {
+    return true; // can't tell: behind a button
+  }
+}
+const risky = (item) => item?.kind === 'file' && (RUNS.test(item.id) || (!WIN && (RUNS_LINUX.test(item.id) || marked(item.id))));
 
 // Folders asked for by what they are ("ouvre mes téléchargements", "open the file explorer").
 const FOLDERS = [
@@ -172,6 +229,12 @@ function knownFolder(text) {
 }
 
 function openKnown(id) {
+  if (!WIN && id === 'explorer') return shell.openPath(os.homedir());
+  if (!WIN && id === 'recycle') {
+    const trash = path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'Trash', 'files');
+    fs.mkdirSync(trash, { recursive: true });
+    return shell.openPath(trash);
+  }
   if (id === 'explorer') return spawn('explorer.exe', [], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   if (id === 'recycle') return spawn('explorer.exe', ['shell:RecycleBinFolder'], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   return shell.openPath(app.getPath(id));
@@ -201,6 +264,14 @@ async function launch({ kind, id } = {}) {
   if (!item) throw new Error('not found');
   if (kind === 'steam') return shell.openExternal(`steam://rungameid/${id}`);
   if (kind === 'epic') return shell.openExternal(`com.epicgames.launcher://apps/${encodeURIComponent(id)}?action=launch&silent=true`);
+  if (!WIN) {
+    await new Promise((resolve, reject) => {
+      const child = spawn('gtk-launch', [id], { detached: true, stdio: 'ignore' });
+      child.once('error', reject); // gtk-launch comes with GTK 3
+      child.once('spawn', () => { child.unref(); resolve(); });
+    });
+    return undefined;
+  }
   spawn('explorer.exe', [`shell:AppsFolder\\${id}`], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   return undefined;
 }
@@ -212,7 +283,26 @@ const MEDIA = { pause: [0xb3, 1], play: [0xb3, 1], next: [0xb0, 1], previous: [0
 const KEY_DOWN = 1; // KEYEVENTF_EXTENDEDKEY
 const KEY_UP = 3;   // ...and KEYEVENTF_KEYUP
 
+// Linux: playerctl for the player (browser, Spotify, mpv...), wpctl (PipeWire) for the volume
+const LINUX_MEDIA = {
+  pause: ['playerctl', ['pause']],
+  play: ['playerctl', ['play']],
+  next: ['playerctl', ['next']],
+  previous: ['playerctl', ['previous']],
+  volup: ['wpctl', ['set-volume', '-l', '1.0', '@DEFAULT_AUDIO_SINK@', '10%+']],
+  voldown: ['wpctl', ['set-volume', '@DEFAULT_AUDIO_SINK@', '10%-']],
+  mute: ['wpctl', ['set-mute', '@DEFAULT_AUDIO_SINK@', 'toggle']],
+};
+function linuxMedia(action) {
+  const cmd = LINUX_MEDIA[action];
+  if (!cmd) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    execFile(cmd[0], cmd[1], { timeout: 5000 }, (err) => resolve(!err));
+  });
+}
+
 async function media(action) {
+  if (!WIN) return linuxMedia(action);
   if (!WIN || !MEDIA[action]) return false;
   const [key, times] = MEDIA[action];
   return powershell(
@@ -225,6 +315,7 @@ async function media(action) {
 async function music(query) {
   const q = String(query || '').trim().slice(0, 200);
   if (!q) return false;
+  if (!WIN) { await youtube(q); return true; } // Linux: no Spotify app, play it on YouTube
   try {
     await shell.openExternal(`spotify:search:${encodeURIComponent(q)}`);
   } catch {
