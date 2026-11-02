@@ -580,6 +580,16 @@ async function boot() {
     panel.say({ kind: 'info', line: t.end, hold: 5000 });
   };
 
+  // Where ~/.config/hypr/hyprlock.conf draws her mask: a 170 px image (in screen pixels) whose middle
+  // is 215 px above the screen's, made from mask-asleep.svg (viewBox -93 -117 190 190). Her mask's
+  // own middle, (0, 0) in that viewBox, and its size, in this page's pixels.
+  const lockMaskSpot = () => {
+    const dpr = window.devicePixelRatio || 1;
+    const unit = 170 / 190 / dpr;
+    // the viewBox's middle is (2, -22): her face's middle sits 2 left of it and 22 below
+    return { x: innerWidth / 2 - 2 * unit, y: innerHeight / 2 - 215 / dpr + 22 * unit, k: unit };
+  };
+
   // your lock screen: when it came up, and whether she dozed off because of it
   let lockedAt = 0;
   let dozedForLock = false;
@@ -814,8 +824,15 @@ async function boot() {
         if (capri.stowed || !['idle', 'sleep'].includes(capri.mode)) break; // Claude's at work: she keeps watch
         panel.hide();
         capri.setMode('sleep');
+        for (let i = 0; capri.busy && i < 100 && lockedAt; i++) await wait(150); // a move or her intro: let it end
+        if (!lockedAt) break; // unlocked already
         await capri.doze();
         dozedForLock = capri.dormant;
+        // under the lock screen, her mask goes where hyprlock draws it, so it's still there as it fades
+        if (dozedForLock) {
+          const at = lockMaskSpot();
+          mask.place(at.x, at.y, at.k);
+        }
         break;
       case 'unlocked': { // you're back: her eyes snap open and she greets you
         const away = lockedAt ? Date.now() - lockedAt : 0;
@@ -823,10 +840,19 @@ async function boot() {
         if (capri.stowed) break;
         const woke = dozedForLock;
         dozedForLock = false;
-        if (woke) capri.wake();
+        if (woke && capri.dormant) {
+          // the lock screen fades and her mask is still there, asleep; her eyes snap open, then she
+          // streaks back to her spot and comes back together there
+          await wait(reducedMotion.matches ? 300 : 1300);
+          mask.wake();
+          await wait(reducedMotion.matches ? 0 : 550);
+          if (capri.dormant) await capri.rouse({ fromHead: { x: mask.x + mask.cx, y: mask.y + mask.cy } });
+        } else if (woke) {
+          capri.wake();
+        }
         const t = brain.t.pc;
         const line = away >= 5 * 60000 ? fmt(pick(t.unlockLong), { time: duration(away, brain.lang) }) : pick(t.unlock);
-        setTimeout(() => panel.say({ kind: 'info', face: away >= 5 * 60000 ? 'look' : 'smug', line, hold: 4500 }), woke ? 1400 : 300);
+        setTimeout(() => panel.say({ kind: 'info', face: away >= 5 * 60000 ? 'look' : 'smug', line, hold: 4500 }), 300);
         break;
       }
       case 'workspace': // you switched workspaces (Hyprland): she hops along

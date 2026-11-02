@@ -1410,7 +1410,8 @@ export class Capri {
 
   // Back from her mask: her eyes snap open, then she comes back together around it,
   // on her ledge again if it's still there.
-  async rouse() {
+  // fromHead: her mask was somewhere else (in the lock screen's spot): she streaks back from there.
+  async rouse({ fromHead = null } = {}) {
     if (!this.dormant) return;
     this.dormant = false;
     this.busy = true;
@@ -1424,9 +1425,9 @@ export class Capri {
     Object.assign(this.p, { alpha: 0, collapse: 0.6, dissolve: 0.5, glitch: 0, split: 0, sparkle: 1 });
     const win = this.dozedOn && this.perchWin(this.dozedOn.id);
     if (win && this.canSit(win) && !this.covered(win, win.x + this.dozedOn.dx)) {
-      await this.arrive(this.seat(win, this.dozedOn.dx), { face: this.facing, stance: 'sit', perch: this.dozedOn, beam: false });
+      await this.arrive(this.seat(win, this.dozedOn.dx), { face: this.facing, stance: 'sit', perch: this.dozedOn, beam: !!fromHead, fromHead });
     } else {
-      await this.arrive({ x: this.pos.x, y: this.dozedOn ? this.floor : this.pos.y }, { face: this.facing, beam: false });
+      await this.arrive({ x: this.pos.x, y: this.dozedOn ? this.floor : this.pos.y }, { face: this.facing, beam: !!fromHead, fromHead });
     }
     this.dozedOn = null;
     await this.settle();
