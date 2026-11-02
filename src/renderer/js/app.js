@@ -14,8 +14,10 @@ import { Reminders, clock } from './reminders.js';
 import { Look } from './look.js';
 import { Pc } from './pc.js';
 import { linesFor } from './lines.js';
-import { pick, fmt, reducedMotion } from './util.js';
+import { pick, fmt, duration, reducedMotion } from './util.js';
 import { Reactions } from './reactions.js';
+import { Thief } from './steal.js';
+import { Petting } from './pet.js';
 
 const host = window.host;
 
@@ -158,6 +160,7 @@ async function boot() {
         if (pointer && now - lastMove > AWAY_MS) onBack?.(now - lastMove);
         lastMove = now;
         pointer = { x: at.x, y: at.y };
+        if (at.inside) capri.sawPointer(at.x, at.y);
       }
       mouse = at.inside ? { x: at.x, y: at.y } : null;
       hoverChip();
@@ -233,7 +236,12 @@ async function boot() {
       mask.hide();
     }
   };
-  capri.onMode = (mode, prev) => chip.setMode(mode, prev);
+  capri.onGlitch = (kind) => window.host.glitch(kind);
+  capri.onMode = (mode, prev) => {
+    chip.setMode(mode, prev);
+    window.host.reportMode(mode);
+  };
+  window.host.reportMode(capri.mode);
   // now and then she says something about the satellite: while she looks at it, or once
   // the red light has gone up (never during, nothing should cover that)
   capri.onGaze = (when) => {
@@ -407,6 +415,12 @@ async function boot() {
       actions: [{ id: 'talk', label: brain.t.chat.talk }], onAction: () => chat.start(),
     });
   };
+  // her hands on your pointer now and then (steal.js)
+  const thief = new Thief({ capri, panel, brain, chat, guide, pc, host, fx, voice, active: () => performance.now() - lastMove });
+  thief.enabled = config.stealPointer !== false;
+  // your hand on her (pet.js)
+  const petting = new Petting({ capri, panel, brain, bond, jealousy, fx, voice, thief });
+  capri.onPointer = (x, y) => petting.move(x, y);
   // ...and to what you do (reactions.js), never right after saying something anyway
   const reactions = new Reactions({
     capri, panel, chat, guide, host, active: () => performance.now() - lastMove,
@@ -566,8 +580,12 @@ async function boot() {
     panel.say({ kind: 'info', line: t.end, hold: 5000 });
   };
 
+  // your lock screen: when it came up, and whether she dozed off because of it
+  let lockedAt = 0;
+  let dozedForLock = false;
+
   // what's in here, for --dev scripts (debug route `eval`)
-  window.dev = { capri, brain, panel, chat, guide, fx, voice, bond, jealousy, reminders, look, pc, setup, screens: () => screens };
+  window.dev = { capri, brain, panel, chat, guide, fx, voice, bond, jealousy, reminders, look, pc, setup, thief, petting, screens: () => screens };
 
   host.onClaudeEvent((evt) => brain.handle(evt));
   host.onWindows((data) => {
@@ -669,6 +687,7 @@ async function boot() {
     reminders.sync(cfg.reminders); // one may have been cancelled from her menu
     capri.wander = cfg.wander;
     capri.possessWindows = cfg.possess;
+    thief.enabled = cfg.stealPointer !== false;
     capri.restOn = cfg.rest || 'corner';
     applyMotion(cfg.motion);
     applyTheme(cfg.theme);
@@ -788,6 +807,30 @@ async function boot() {
         if (cmd.topic === 'welcome') guide.welcome();
         else if (cmd.topic === 'menu') guide.menu();
         else if (typeof guide[cmd.topic] === 'function') guide.scene(() => guide[cmd.topic]());
+        break;
+      case 'locked': // your screen locked (hyprlock): she folds down to her mask, like on the lock screen
+        lockedAt = Date.now();
+        dozedForLock = false;
+        if (capri.stowed || !['idle', 'sleep'].includes(capri.mode)) break; // Claude's at work: she keeps watch
+        panel.hide();
+        capri.setMode('sleep');
+        await capri.doze();
+        dozedForLock = capri.dormant;
+        break;
+      case 'unlocked': { // you're back: her eyes snap open and she greets you
+        const away = lockedAt ? Date.now() - lockedAt : 0;
+        lockedAt = 0;
+        if (capri.stowed) break;
+        const woke = dozedForLock;
+        dozedForLock = false;
+        if (woke) capri.wake();
+        const t = brain.t.pc;
+        const line = away >= 5 * 60000 ? fmt(pick(t.unlockLong), { time: duration(away, brain.lang) }) : pick(t.unlock);
+        setTimeout(() => panel.say({ kind: 'info', face: away >= 5 * 60000 ? 'look' : 'smug', line, hold: 4500 }), woke ? 1400 : 300);
+        break;
+      }
+      case 'workspace': // you switched workspaces (Hyprland): she hops along
+        capri.hopWorkspace();
         break;
       case 'stow': // Ctrl+Alt+C: into her biochip, or back out
         if (cmd.on) capri.stow();

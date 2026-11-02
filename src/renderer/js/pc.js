@@ -180,12 +180,18 @@ export class Pc {
     const line = fmt(pick(this.t.usb), { drive });
     this.say(navigator.userAgent.includes('Linux') ? line.replace(`${drive}:`, drive) : line, 'look', 2500);
     if (!this.quiet || !(await this.whenFree())) return;
+    if (await this.capri.visit(await this.clock())) this.say(pick(this.t.usbBack), 'smug', 4500);
+  }
+
+  // Where the USB things come in: the clock, wherever your bar has it.
+  async clock() {
     const { w, h } = this.capri.view;
-    if (await this.capri.visit({ x: w - 140, y: h - 6 })) this.say(pick(this.t.usbBack), 'smug', 4500);
+    const at = (await this.host.trayPlace().catch(() => null))?.corner;
+    return at ? { x: at.x + at.w / 2, y: at.y + at.h / 2 } : { x: w - 140, y: h - 6 };
   }
 
   // anything else plugged in or out: a phone, a controller, a headset...
-  device(plug) {
+  async device(plug) {
     const kind = kindOf(plug);
     if (kind === 'drive' || Date.now() - this.plugAt < PLUG_EVERY) return;
     this.plugAt = Date.now();
@@ -193,8 +199,8 @@ export class Pc {
     this.capri.wake();
     // plugged in: a jolt of lightning down to where it came in (by the clock), before she talks
     if (plug.in && this.capri.free) {
-      const { w, h } = this.capri.view;
-      this.capri.zap(w - 140, h - 10);
+      const { x, y } = await this.clock();
+      this.capri.zap(x, y);
     }
     this.say(fmt(pick(lines[kind] || lines.device), { name: plug.name }), plug.in ? 'look' : 'aside', 4000);
   }

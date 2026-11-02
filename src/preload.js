@@ -16,7 +16,10 @@ contextBridge.exposeInMainWorld('host', {
   onWindows: on('windows:update'),
   setInteractive: (on) => ipcRenderer.send('overlay:interactive', Boolean(on)),
   rearm: () => ipcRenderer.send('overlay:rearm'),
+  glitch: (kind) => ipcRenderer.send('fx:glitch', String(kind)), // her glitch over the whole screen (Hyprland)
+  reportMode: (mode) => ipcRenderer.send('capri:mode', String(mode)), // for her Waybar pill
   cursor: () => ipcRenderer.invoke('overlay:cursor'),
+  movePointer: (x, y) => ipcRenderer.invoke('overlay:movePointer', { x, y }),
   screens: () => ipcRenderer.invoke('screens:list'),
   moveScreen: (id) => ipcRenderer.invoke('screens:move', id),
   getConfig: () => ipcRenderer.invoke('config:get'),

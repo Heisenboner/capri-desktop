@@ -37,7 +37,7 @@ function readJson(req) {
   });
 }
 
-function createBridge({ port, onEvent, onDebug }) {
+function createBridge({ port, onEvent, onState, onDebug }) {
   const server = http.createServer(async (req, res) => {
     // Browsers always send an Origin header on cross-site requests; hooks never do.
     // Refusing those keeps random web pages from puppeting Capri.
@@ -47,6 +47,11 @@ function createBridge({ port, onEvent, onDebug }) {
 
     if (req.method === 'GET' && url.pathname === '/health') {
       return send(res, 200, { ok: true, name: 'capri', pid: process.pid });
+    }
+
+    // what she's up to, for a status bar: { mode, visible, done, action }
+    if (req.method === 'GET' && url.pathname === '/state' && onState) {
+      return send(res, 200, { ok: true, ...onState() });
     }
 
     if (req.method === 'POST' && url.pathname === '/event') {

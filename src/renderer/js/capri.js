@@ -110,6 +110,8 @@ export class Capri {
     this.uplinkDue = false;
     this.pointing = null; // what she's showing you: { rect, aim, dir, side, reach, label, pointer }
     this.mouse = null; // last pointer position seen
+    this.pressed = false; // the button went down on her and hasn't come up yet
+    this.onPointer = null; // (x, y) => the pointer moved, not holding her (pet.js)
 
     this.onMove = null;     // her head moved on screen
     this.onTeleport = null; // ('start' | 'end')
@@ -366,6 +368,7 @@ export class Capri {
 
   setWindows(data) {
     this.windows = data;
+    this.windowsAt = performance.now();
     if (this.stance !== 'sit' || this.busy || this.dragging) return;
     const win = this.perchWin(this.perch.id);
     const dx = win ? clamp(this.perch.dx, 50, win.w - 60) : 0;
@@ -1200,6 +1203,7 @@ export class Capri {
   async hurt() {
     this.perform('flinch');
     if (reducedMotion.matches) return;
+    this.onGlitch?.('hit');
     const p = this.p;
     p.sil = RED;
     p.silAmount = 1;
@@ -1453,6 +1457,26 @@ export class Capri {
     await this.settle();
   }
 
+  // You switched workspaces (Hyprland): she glitches out and comes back on this one, on the window
+  // in front if she can sit on it, else at her post. Asleep or put away, she stays as she is.
+  async hopWorkspace() {
+    if (this.stowed || this.stowing || this.dormant || this.busy || this.dragging || this.mode === 'sleep') return;
+    if (!['stand', 'sit', 'peek'].includes(this.stance)) return;
+    this.busy = true;
+    this.onTeleport?.('start');
+    const asked = performance.now();
+    const fromHead = await this.vanish();
+    // the new workspace's windows: they come a moment after the switch
+    while ((this.windowsAt || 0) < asked && performance.now() - asked < 600) await sleep(40);
+    const seat = this.pickSeat({ frontOnly: true });
+    if (seat) {
+      await this.arrive(this.seat(seat.win, seat.dx), { stance: 'sit', perch: { id: seat.win.id, dx: seat.dx }, face: this.facing, fromHead });
+    } else {
+      await this.arrive(this.spot('post'), { fromHead });
+    }
+    await this.settle();
+  }
+
   sitOn({ win, dx }) {
     return this.teleport(this.seat(win, dx), { stance: 'sit', perch: { id: win.id, dx }, face: this.facing });
   }
@@ -1497,6 +1521,7 @@ export class Capri {
     await this.perform('dive');
     const head = await this.vanish({ beam: false });
     this.fx.streak(head.x, head.y, this.pos.x, win.y + 40 * s);
+    if (!reducedMotion.matches) this.onGlitch?.(angry ? 'hit' : 'soft');
 
     const rect = () => this.windows.wins.find((w) => w.id === id) || null;
     const covers = () => this.coversOf(id);
@@ -1864,11 +1889,13 @@ export class Capri {
         return;
       }
       down = { x: e.clientX, y: e.clientY, pos: { ...this.pos }, at: this.spritePoint(e.clientX, e.clientY) };
+      this.pressed = true;
       this.track = [{ x: e.clientX, y: e.clientY, t: performance.now() }];
       if (thrown) this.pickUp(down);
     });
     window.addEventListener('mousemove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY }; // a window she's in watches it
+      if (!down) this.onPointer?.(e.clientX, e.clientY);
       if (down) {
         const now = performance.now();
         this.track.push({ x: e.clientX, y: e.clientY, t: now });
@@ -1891,6 +1918,7 @@ export class Capri {
       if (!down) return;
       const wasDragging = this.dragging;
       down = null;
+      this.pressed = false;
       this.dragging = false;
       if (!wasDragging) {
         this.onClick?.();
@@ -2579,6 +2607,15 @@ export class Capri {
     }
     if (this.pos.y < this.floor - 2) this.fall();
     else this.perform('land');
+  }
+
+  // The pointer as polled on Linux, where its moves never reach her click-through window: what
+  // Windows brings her through the mousemove above. Held, she has other things on her mind.
+  sawPointer(x, y) {
+    this.mouse = { x, y };
+    if (this.pressed) return;
+    this.onPointer?.(x, y);
+    this.notice(x, y);
   }
 
   // When the pointer comes close she turns around to face it and cocks her head;

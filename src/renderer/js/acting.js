@@ -116,6 +116,20 @@ export const ACTS = {
     ],
   },
 
+  // pet: she leans into your hand, twice
+  nuzzle: {
+    priority: 1,
+    directional: true,
+    keys: [
+      [2, { head: 0.1, mane: 0.1, tilt: 1 }],
+      [9, { head: 0.24, mane: 0.17, tilt: 2.6, bob: 1 }],
+      [5, { head: 0.15, mane: 0.1, tilt: 1.4 }],
+      [9, { head: 0.26, mane: 0.19, tilt: 2.8, bob: 1 }],
+      [4, { head: 0.1, mane: 0.05, tilt: 0.8 }],
+      [1, {}],
+    ],
+  },
+
   // head snapping from one side to the other, held each time
   look: {
     priority: 1,

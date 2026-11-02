@@ -16,13 +16,14 @@ import { pick, fmt, today } from './util.js';
 export const STAGES = [0, 100, 300, 550, 850];
 const FULL = 1000;
 // the most a day from each source
-const CAPS = { day: 10, time: 18, chat: 20, click: 4, claude: 10, remind: 6 };
+const CAPS = { day: 10, time: 18, chat: 20, click: 4, claude: 10, remind: 6, pet: 6 };
 const SAVE_MS = 15000;
 
 // How she feels right now, after something just happened between you, told to her chat so it
 // answers the way she just acted (a small model needs it said plainly), and how long it lasts.
 // Angry or sulking, it lasts until you say sorry (or a while).
 const FEELINGS = {
+  petted: ['They just petted you and you liked it, not that you would admit it. You called them a good boy.', 10],
   thrown: ['A moment ago the user grabbed you and threw you across the screen, and you crashed. You are a bit shaken, and you let them know.', 4],
   fun: ['A moment ago the user threw you across the screen and you loved it. You are excited and want to go again.', 3],
   dizzy: ['The user just threw you across the screen twice in a row. You are still dizzy, and grumpy about it.', 5],

@@ -21,7 +21,7 @@ const EVENTS = new Set([
   'activewindow', 'activewindowv2', 'openwindow', 'closewindow', 'movewindow', 'movewindowv2',
   'windowtitle', 'windowtitlev2', 'changefloatingmode', 'fullscreen', 'minimized', 'workspace',
   'workspacev2', 'focusedmon', 'focusedmonv2', 'monitoradded', 'monitoraddedv2', 'monitorremoved',
-  'activespecial', 'activespecialv2',
+  'activespecial', 'activespecialv2', 'pin',
 ]);
 
 // the same list as windows.ps1: a key, what gives it away in a title, its own app's window class
@@ -97,7 +97,7 @@ function usbDevices() {
 const layer = (c) => (c.fullscreen ? 0 : c.floating ? 1 : 2);
 const frontFirst = (a, b) => layer(a) - layer(b) || a.focusHistoryID - b.focusHistoryID;
 
-function startHyprWatch({ overlay, onUpdate }) {
+function startHyprWatch({ overlay, onUpdate, area }) {
   let stopped = false;
   let looking = false;
   let again = false;
@@ -137,6 +137,9 @@ function startHyprWatch({ overlay, onUpdate }) {
       const shown = new Set(monitors.flatMap((m) => [m.activeWorkspace?.id, m.specialWorkspace?.id]).filter(Boolean));
       const self = clients.find((c) => c.pid === process.pid);
       if (self) origin = self.at;
+      if (self && (!self.floating || !self.pinned)) {
+        await hypr.restoreOverlay(area()).catch((err) => console.error('[capri] restore:', err.message));
+      }
       const open = clients.filter((c) => c.pid !== process.pid && c.mapped && !c.hidden && shown.has(c.workspace?.id));
       open.sort(frontFirst);
       const top = [...open].sort((a, b) => a.focusHistoryID - b.focusHistoryID)[0];

@@ -39,6 +39,57 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let overlay = null;
+let quitting = false; // the only time her window may close
+
+// What her Waybar pill shows (GET /state): her mode from the renderer, and a few seconds of "done"
+let herMode = 'idle'; // idle | work | alert | sleep
+let doneUntil = 0;
+let doneTimer = null;
+let lastAction = '';
+let barTimer = null;
+// Waybar re-runs the pill's script on SIGRTMIN+8 ("signal": 8 in its config)
+function pokeBar() {
+  if (process.platform !== 'linux') return;
+  clearTimeout(barTimer);
+  barTimer = setTimeout(() => execFile('pkill', ['-RTMIN+8', '-x', 'waybar'], () => {}), 150);
+}
+// Your active window's border in her colors (Hyprland): her sparks' red while Claude works or waits
+// on you, her mask's green asleep or folded away, your own border the rest of the time.
+const BORDER_RED = { colors: ['rgba(ff2152ff)', 'rgba(fc146eff)'], angle: 45 };
+const BORDER_GREEN = { colors: ['rgba(36ff7aff)'], angle: 0 };
+let borderShown = 'own';
+function paintBorders(force = false) {
+  if (!hypr.available) return;
+  const cfg = config.load();
+  let want = 'own';
+  if (cfg.herBorders !== false) {
+    if (herMode === 'work' || herMode === 'alert') want = 'red';
+    else if (herMode === 'sleep' || cfg.visible === false) want = 'green';
+  }
+  if (want === borderShown && !force) return;
+  borderShown = want;
+  hypr.paintBorder(want === 'red' ? BORDER_RED : want === 'green' ? BORDER_GREEN : null).catch(() => {});
+}
+
+function herState() {
+  return { mode: herMode, visible: config.load().visible !== false, done: Date.now() < doneUntil, action: lastAction };
+}
+function noteEvent(evt) {
+  const name = evt.hook_event_name;
+  if (name === 'PreToolUse') {
+    const input = evt.tool_input || {};
+    const what = input.file_path ? path.basename(String(input.file_path)) : input.command || input.pattern || input.url || '';
+    lastAction = `${evt.tool_name || ''} ${String(what).split('\n')[0].slice(0, 40)}`.trim();
+  } else if (name === 'UserPromptSubmit') {
+    lastAction = '';
+    doneUntil = 0;
+  } else if (name === 'Stop') {
+    doneUntil = Date.now() + 10000;
+    clearTimeout(doneTimer);
+    doneTimer = setTimeout(pokeBar, 10100);
+    pokeBar();
+  }
+}
 let tray = null;
 let trayMenu = null; // also what she opens when you right-click her
 let menuOpen = false; // her menu is up: she stays clickable under it
@@ -126,6 +177,7 @@ function moveOverlay(id) {
   fitOverlay();
   const { area } = overlayArea();
   overlay.setBounds(area);
+  placeOnHyprland();
   windowWatch?.refresh();
   rebuildTray();
   return area;
@@ -137,8 +189,20 @@ function moveOverlay(id) {
 // below the top of the taskbar (0, or its height).
 function overlayArea() {
   const { workArea, bounds } = targetDisplay();
+  if (hypr.available) return { area: bounds, gap: 0 }; // her window rule: the whole screen
   const area = config.load().rest === 'taskbar' ? { ...bounds, y: bounds.y + 1, height: bounds.height - 1 } : workArea;
   return { area, gap: area.y + area.height - (workArea.y + workArea.height) };
+}
+
+// A Wayland window can't place itself and never learns where it is: setBounds doesn't move her and
+// getBounds says 0,0 on any screen, so on Hyprland it's the compositor that moves her, and where
+// she is comes from the screen she's meant to be on.
+function placeOnHyprland() {
+  if (hypr.available) hypr.restoreOverlay(overlayArea().area).catch((err) => console.error('[capri] place:', err.message));
+}
+
+function overlayRect() {
+  return hypr.available ? targetDisplay().bounds : overlay.getBounds();
 }
 
 function fitOverlay() {
@@ -208,9 +272,18 @@ function createOverlay() {
   overlay.once('ready-to-show', () => {
     fitOverlay();
     overlay.showInactive();
+    if (overlayArea().area.x || overlayArea().area.y || displays().length > 1) setTimeout(placeOnHyprland, 300);
+  });
+  // With the pointer on her or her chat open she has the focus, so a compositor's close key lands on
+  // her. Closed, she'd be gone for good while the app kept running: only quitting takes her window.
+  overlay.on('close', (e) => {
+    if (!quitting) e.preventDefault();
   });
   overlay.webContents.on('render-process-gone', (_e, details) => {
     console.error('[capri] renderer gone:', details.reason);
+    setTimeout(() => {
+      if (!quitting && overlay && !overlay.isDestroyed()) overlay.reload();
+    }, 1000);
   });
   if (DEV) {
     overlay.webContents.on('console-message', (e) => {
@@ -231,6 +304,8 @@ function toggleVisible(force) {
   config.save({ visible });
   sendCommand('stow', { on: !visible });
   rebuildTray();
+  pokeBar();
+  paintBorders();
 }
 
 function playDemo() {
@@ -420,11 +495,20 @@ function rebuildTray() {
     },
     { label: t.wander, type: 'checkbox', checked: cfg.wander, click: (item) => updateConfig({ wander: item.checked }) },
     { label: t.possess, type: 'checkbox', checked: cfg.possess, click: (item) => updateConfig({ possess: item.checked }) },
+    ...(hypr.available ? [{
+      label: t.steal, type: 'checkbox', checked: cfg.stealPointer !== false, click: (item) => updateConfig({ stealPointer: item.checked }),
+    }, {
+      label: t.glitch, type: 'checkbox', checked: cfg.screenGlitch !== false, click: (item) => updateConfig({ screenGlitch: item.checked }),
+    }, {
+      label: t.borders, type: 'checkbox', checked: cfg.herBorders !== false,
+      click: (item) => { updateConfig({ herBorders: item.checked }); paintBorders(); },
+    }] : []),
     { label: t.jealous, type: 'checkbox', checked: cfg.jealous !== false, click: (item) => updateConfig({ jealous: item.checked }) },
-    {
+    // Windows only: elsewhere she can't check that no other key is held before she sends Ctrl+W
+    ...(process.platform === 'win32' ? [{
       label: t.closePages, type: 'checkbox', checked: cfg.closePages !== false, enabled: cfg.jealous !== false,
       click: (item) => updateConfig({ closePages: item.checked }),
-    },
+    }] : []),
     { label: t.pcReact, type: 'checkbox', checked: cfg.pcReact !== false, click: (item) => updateConfig({ pcReact: item.checked }) },
     { label: t.awareChat, type: 'checkbox', checked: cfg.awareChat !== false, click: (item) => updateConfig({ awareChat: item.checked }) },
     {
@@ -747,16 +831,35 @@ function registerIpc() {
     wantInteractive = on;
     if (!menuOpen) setClickable(on); // the pointer going over her menu isn't the pointer leaving her
   });
+  ipcMain.on('capri:mode', (_e, mode) => {
+    if (!['idle', 'work', 'alert', 'sleep'].includes(mode) || mode === herMode) return;
+    herMode = mode;
+    pokeBar();
+    paintBorders();
+  });
+  ipcMain.on('fx:glitch', (_e, kind) => {
+    if (hypr.available && config.load().screenGlitch !== false) hypr.glitch(kind === 'soft' ? 'soft' : 'hit').catch(() => {});
+  });
   ipcMain.on('overlay:rearm', () => rearmOverlay()); // the pointer moved over her and she never heard of it
   ipcMain.handle('overlay:cursor', async () => {
     const p = await cursorPoint();
-    const b = overlay.getBounds();
+    const b = overlayRect();
     const inside = p.x >= b.x && p.y >= b.y && p.x < b.x + b.width && p.y < b.y + b.height;
     return { x: p.x - b.x, y: p.y - b.y, inside, display: displayAt(p).id };
   });
+  // she steals your pointer (steal.js): (x, y) from her window, and only ever inside it
+  ipcMain.handle('overlay:movePointer', async (_e, { x, y } = {}) => {
+    if (!hypr.available || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+    const b = overlayRect();
+    await hypr.moveCursor(
+      Math.min(b.x + b.width - 1, Math.max(b.x, b.x + x)),
+      Math.min(b.y + b.height - 1, Math.max(b.y, b.y + y)),
+    );
+    return true;
+  });
   // your screens (their bounds), the one she's on, and where her window is
   ipcMain.handle('screens:list', () => {
-    const o = overlay.getBounds();
+    const o = overlayRect();
     return {
       current: targetDisplay().id,
       origin: { x: o.x, y: o.y },
@@ -768,7 +871,7 @@ function registerIpc() {
     if (!area) return null;
     await new Promise((r) => setTimeout(r, 60));
     overlay.setBounds(area); // again, once Windows has settled it on its new screen
-    const o = overlay.getBounds();
+    const o = overlayRect();
     return { origin: { x: o.x, y: o.y }, width: o.width, height: o.height, gap: overlayArea().gap };
   });
   ipcMain.handle('config:get', () => rendererConfig());
@@ -1004,12 +1107,15 @@ function registerIpc() {
   });
   // her guide: where her tray icon is (it lives in the taskbar, off the overlay, hence overlay
   // coordinates past its edge), and the corner by the clock in case Windows hid it behind the ^
-  ipcMain.handle('guide:tray', () => {
-    const o = overlay.getBounds();
+  ipcMain.handle('guide:tray', async () => {
+    const o = overlayRect();
     const d = targetDisplay().bounds;
     const b = tray?.getBounds();
     const icon = b && b.width > 0 ? { x: b.x - o.x, y: b.y - o.y, w: b.width, h: b.height } : null;
-    const corner = { x: d.x + d.width - 150 - o.x, y: d.y + d.height - 44 - o.y, w: 140, h: 40 };
+    // a bar along the top (Waybar's reserved space) has the clock up there
+    const monitors = hypr.available ? await hypr.json('monitors').catch(() => []) : [];
+    const top = monitors.find((m) => m.focused)?.reserved?.[1] || 0;
+    const corner = { x: d.x + d.width - 150 - o.x, y: top ? d.y + top - 40 - o.y + 8 : d.y + d.height - 44 - o.y, w: 140, h: 40 };
     return { icon, corner };
   });
   // her guide: Claude Code's folder (~/.claude) in Explorer, its settings file selected
@@ -1169,6 +1275,7 @@ function main() {
     createTray();
     windowWatch = startWindowWatch({
       overlay,
+      area: () => overlayArea().area,
       onUpdate: (data) => {
         // a click on the taskbar brings it up over her: sitting on it, her legs would vanish behind it
         if (data.taskbar && !lastWindows?.taskbar && config.load().rest === 'taskbar') raiseOverlay();
@@ -1179,9 +1286,54 @@ function main() {
     createBridge({
       port: PORT,
       // her own Claude Code chat's hooks would cover its answer with theirs
-      onEvent: (evt) => !llm.isChatSession(evt.session_id) && overlay?.webContents.send('claude:event', evt),
+      onEvent: (evt) => {
+        if (llm.isChatSession(evt.session_id)) return;
+        noteEvent(evt);
+        overlay?.webContents.send('claude:event', evt);
+      },
+      onState: herState,
       onDebug: DEV ? debugHandler : null,
     });
+    if (hypr.available) {
+      hypr.readOwnBorder().catch(() => {});
+      let hopTimer = null;
+      hypr.events((name) => {
+        // your config reloaded: your border is back to what it says, so it's read again and hers put back
+        if (name === 'configreloaded') {
+          borderShown = 'own';
+          hypr.readOwnBorder().then(() => paintBorders(true)).catch(() => {});
+        }
+        // you switched workspaces: she hops along (one hop for the burst of events a switch makes)
+        if (name === 'workspace' || name === 'workspacev2') {
+          clearTimeout(hopTimer);
+          hopTimer = setTimeout(() => sendCommand('workspace'), 30);
+        }
+      });
+    }
+    // your lock screen: Hyprland doesn't say when the session locks, so she looks for hyprlock itself
+    // (however it was started: SUPER+L, hypridle, before sleep)
+    if (hypr.available) {
+      let locked = false;
+      const lockerUp = () => {
+        try {
+          return fs.readdirSync('/proc').some((pid) => /^\d+$/.test(pid) && (() => {
+            try {
+              return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim() === 'hyprlock';
+            } catch {
+              return false; // gone already
+            }
+          })());
+        } catch {
+          return false;
+        }
+      };
+      setInterval(() => {
+        const now = lockerUp();
+        if (now === locked) return;
+        locked = now;
+        sendCommand(locked ? 'locked' : 'unlocked');
+      }, 1000).unref();
+    }
     // Wayland has no such thing as a global shortcut for an app: on Hyprland it's a bind to --toggle
     if (!hypr.available) globalShortcut.register('Control+Alt+C', () => toggleVisible());
     llm.restoreClaude(readMemory().claude);
@@ -1202,7 +1354,12 @@ function main() {
     powerMonitor.on('unlock-screen', () => setTimeout(rearmOverlay, 1000));
   });
 
+  app.on('before-quit', () => {
+    quitting = true;
+  });
   app.on('will-quit', () => {
+    if (hypr.available) hypr.clearShader(); // never leave her glitch on your screen
+    if (hypr.available && borderShown !== 'own') hypr.paintBorder(null).catch(() => {}); // your own border back
     globalShortcut.unregisterAll();
     windowWatch?.stop();
   });

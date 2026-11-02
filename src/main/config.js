@@ -35,6 +35,9 @@ const DEFAULTS = {
   render: 'auto',   // how her window is drawn: 'auto', 'gl' (OpenGL) or 'software' (no graphics card), for PCs that show it black
   follow: true,      // with several screens, she follows the pointer to the one you're on
   jealous: true,     // she gets jealous when she sees you on another AI (bond.js)
+  herBorders: true, // your active window's border in her colors: red while Claude works, green asleep (Hyprland only)
+  screenGlitch: true, // her glitch over the whole screen when a command fails or she possesses a window (Hyprland only)
+  stealPointer: true, // now and then she steals your pointer and flings it (steal.js, Hyprland only)
   closePages: true,  // jealous, she closes their pages in your browser, and pages to download them
   reminders: [],     // the reminders she keeps: [{ id, at, text, made }] (reminders.js)
   bond: null,        // how close she is to you: { xp, first, last, days, streak, caps } (bond.js)

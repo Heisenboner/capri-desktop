@@ -268,6 +268,8 @@ export const LINES = {
     screens: { hello: ['Coucou, l’autre écran.', 'Tu bosses ici maintenant ? J’arrive.', 'Me voilà.'] },
     // elle réagit à ton PC (pc.js) : processeur, batterie, réseau, clé USB, jeu
     pc: {
+      unlock: ['Ah, te revoilà. Je dormais pas. Presque pas.', 'Déverrouillé. Salut, V.', 'Mot de passe accepté. Bon retour, choom.'],
+      unlockLong: ['{time} dehors ? Tu m’as manqué. Un peu.', 'Tu me laisses seule {time} et tu crois que je dormais ? …Bon, oui.', 'Re, V. {time} dans le noir, c’est long.'],
       hot: ['Ton processeur est à fond. Moi aussi, je chauffe.', '{cpu} % de processeur. Il fait chaud là-dedans.', 'Ça chauffe ! Tu fais tourner quoi, là ?'],
       cool: ['Ouf. Ça redescend.'],
       low: ['Batterie à {level} %. Je vais pas tenir longtemps.', 'Plus que {level} % de batterie. Branche-moi, choom.'],
@@ -341,6 +343,16 @@ export const LINES = {
       back: ['Ah, te voilà.', 'Je commençais à me demander où tu étais.'],
     },
     // jalouse quand tu utilises une autre IA (bond.js)
+    pet: {
+      good: ['Bon garçon.', 'Qui est un bon garçon ? Toi.', 'Bon garçon. Que ça ne te monte pas à la tête.', 'Je ne ronronne pas. Bon garçon.'],
+      goodName: ['Bon garçon, {name}.'],
+      no: ['Pas touche. Je t’en veux.', 'Non.', 'Tu crois que ça arrange tout ?'],
+      forgive: ['…Bon. Bon garçon. On est quittes.', 'D’accord, d’accord. Tu es pardonné.'],
+    },
+    steal: {
+      took: ['À moi, ton curseur.', 'Il est mieux chez moi.', 'Oups. Il m’a glissé des doigts.', 'Va le chercher.'],
+      lost: ['Hé ! Je jouais avec.', 'Radin.', 'Bon, garde-le.'],
+    },
     jealous: {
       low: ['{rival}, hein ? Fais comme tu veux.', 'Tiens, {rival}. Je ne dis rien.'],
       mid: ['{rival} ? Sérieux ?', 'Tu me trompes avec {rival} ?', 'Je vois tout, tu sais. Même {rival}.'],
@@ -624,6 +636,8 @@ export const LINES = {
     screens: { hello: ['Hi, other screen.', 'Working over here now? Coming.', 'There you are.'] },
     // she reacts to your PC (pc.js): processor, battery, network, USB stick, game
     pc: {
+      unlock: ['Oh, you’re back. I wasn’t asleep. Mostly.', 'Unlocked. Hey, V.', 'Password accepted. Welcome back, choom.'],
+      unlockLong: ['{time} gone? I missed you. A little.', 'You leave me alone for {time} and think I was sleeping? …Okay, yes.', 'Hey, V. {time} in the dark is a long time.'],
       hot: ['Your processor is maxed out. I’m heating up too.', '{cpu}% CPU. It’s getting hot in here.', 'Things are heating up! What are you running?'],
       cool: ['Phew. Cooling down.'],
       low: ['Battery at {level}%. I won’t last long.', 'Only {level}% battery left. Plug me in, choom.'],
@@ -697,6 +711,16 @@ export const LINES = {
       back: ['Oh, there you are.', 'I was starting to wonder where you went.'],
     },
     // jealous when you use another AI (bond.js)
+    pet: {
+      good: ['Good boy.', 'Who’s a good boy? You are.', 'Good boy. Don’t let it go to your head.', 'I’m not purring. Good boy.'],
+      goodName: ['Good boy, {name}.'],
+      no: ['Hands off. I’m mad at you.', 'Nope.', 'You think that fixes it?'],
+      forgive: ['…Fine. Good boy. We’re even.', 'Okay, okay. You’re forgiven.'],
+    },
+    steal: {
+      took: ['Your pointer’s mine now.', 'Mine. Go fetch.', 'Oops. It slipped.', 'It likes me better anyway.'],
+      lost: ['Hey! I was playing with that.', 'Fine. Keep it.', 'Spoilsport.'],
+    },
     jealous: {
       low: ['{rival}, huh? Do what you want.', 'Oh, {rival}. I’m not saying anything.'],
       mid: ['{rival}? Seriously?', 'Are you cheating on me with {rival}?', 'I see everything, you know. Even {rival}.'],
@@ -975,6 +999,8 @@ export const LINES = {
     screens: { hello: ['Hola, otra pantalla.', '¿Ahora trabajas aquí? Voy.', 'Aquí estás.'] },
     // reacciona a tu PC (pc.js): procesador, batería, red, USB, juego
     pc: {
+      unlock: ['Ah, ya volviste. No estaba dormida. Casi no.', 'Desbloqueado. Hola, V.', 'Contraseña aceptada. Bienvenido, choom.'],
+      unlockLong: ['¿{time} fuera? Te eché de menos. Un poco.', '¿Me dejas sola {time} y crees que dormía? …Vale, sí.', 'Hola, V. {time} a oscuras es mucho tiempo.'],
       hot: ['Tu procesador va a tope. Yo también me caliento.', '{cpu} % de CPU. Aquí dentro hace calor.', '¡Esto se calienta! ¿Qué estás ejecutando?'],
       cool: ['Uf. Ya baja.'],
       low: ['Batería al {level} %. No aguantaré mucho.', 'Solo queda un {level} % de batería. Enchúfame, choom.'],
@@ -1048,6 +1074,16 @@ export const LINES = {
       back: ['Ah, aquí estás.', 'Ya me preguntaba dónde estabas.'],
     },
     // celosa cuando usas otra IA (bond.js)
+    pet: {
+      good: ['Buen chico.', '¿Quién es un buen chico? Tú.', 'Buen chico. Que no se te suba a la cabeza.', 'No estoy ronroneando. Buen chico.'],
+      goodName: ['Buen chico, {name}.'],
+      no: ['Quita las manos. Estoy enfadada.', 'No.', '¿Crees que así se arregla?'],
+      forgive: ['…Vale. Buen chico. Estamos en paz.', 'Vale, vale. Estás perdonado.'],
+    },
+    steal: {
+      took: ['Tu puntero ahora es mío.', 'Mío. Ve a buscarlo.', 'Ups. Se me escapó.', 'Le caigo mejor yo.'],
+      lost: ['¡Eh! Estaba jugando con eso.', 'Vale, quédatelo.', 'Aguafiestas.'],
+    },
     jealous: {
       low: ['{rival}, ¿eh? Haz lo que quieras.', 'Vaya, {rival}. No digo nada.'],
       mid: ['¿{rival}? ¿En serio?', '¿Me estás poniendo los cuernos con {rival}?', 'Lo veo todo, ¿sabes? Hasta {rival}.'],
@@ -1328,6 +1364,8 @@ export const LINES = {
     screens: { hello: ['Oi, outra tela.', 'Trabalhando aqui agora? Tô indo.', 'Aí está você.'] },
     // ela reage ao seu PC (pc.js): processador, bateria, rede, pendrive, jogo
     pc: {
+      unlock: ['Ah, voltou. Eu não tava dormindo. Quase não.', 'Desbloqueado. Oi, V.', 'Senha aceita. Bem-vindo de volta, choom.'],
+      unlockLong: ['{time} fora? Senti sua falta. Um pouco.', 'Me deixa sozinha {time} e acha que eu tava dormindo? …Tá, tava.', 'Oi, V. {time} no escuro é muito tempo.'],
       hot: ['Seu processador tá no talo. Eu também tô esquentando.', '{cpu} % de CPU. Tá quente aqui dentro.', 'Tá esquentando! O que você tá rodando?'],
       cool: ['Ufa. Esfriando.'],
       low: ['Bateria em {level} %. Não vou aguentar muito.', 'Só {level} % de bateria. Me liga na tomada, choom.'],
@@ -1401,6 +1439,16 @@ export const LINES = {
       back: ['Ah, aí está você.', 'Já tava me perguntando onde você tinha ido.'],
     },
     // com ciúmes quando você usa outra IA (bond.js)
+    pet: {
+      good: ['Bom garoto.', 'Quem é um bom garoto? Você.', 'Bom garoto. Não vai se achar.', 'Não estou ronronando. Bom garoto.'],
+      goodName: ['Bom garoto, {name}.'],
+      no: ['Tira a mão. Estou brava.', 'Não.', 'Acha que isso resolve?'],
+      forgive: ['…Tá. Bom garoto. Estamos quites.', 'Tá bom, tá bom. Perdoado.'],
+    },
+    steal: {
+      took: ['Seu ponteiro agora é meu.', 'Meu. Vai buscar.', 'Ops. Escapou.', 'Ele gosta mais de mim.'],
+      lost: ['Ei! Eu estava brincando com isso.', 'Tá, fica com ele.', 'Estraga-prazeres.'],
+    },
     jealous: {
       low: ['{rival}, é? Faz o que quiser.', 'Olha só, {rival}. Não digo nada.'],
       mid: ['{rival}? Sério?', 'Tá me traindo com {rival}?', 'Eu vejo tudo, sabia? Até {rival}.'],
@@ -1683,6 +1731,8 @@ export const LINES = {
     screens: { hello: ['Привет, другой экран.', 'Теперь работаешь тут? Иду.', 'Вот ты где.'] },
     // она реагирует на твой ПК (pc.js): процессор, батарея, сеть, флешка, игра
     pc: {
+      unlock: ['О, вернулся. Я не спала. Почти.', 'Разблокировано. Привет, V.', 'Пароль принят. С возвращением, чумба.'],
+      unlockLong: ['{time} тебя не было? Я скучала. Немножко.', 'Оставил меня одну на {time} и думаешь, я спала? …Ладно, спала.', 'Привет, V. {time} в темноте — это долго.'],
       hot: ['Твой процессор на пределе. Я тоже нагреваюсь.', 'Процессор на {cpu} %. Жарко тут.', 'Горячо! Что там у тебя запущено?'],
       cool: ['Фух. Остывает.'],
       low: ['Батарея {level} %. Долго я не протяну.', 'Осталось {level} % батареи. Подключи меня, чумба.'],
@@ -1756,6 +1806,16 @@ export const LINES = {
       back: ['А, вот ты где.', 'Я уже начала скучать.'],
     },
     // ревнует, когда ты пользуешься другим ИИ (bond.js)
+    pet: {
+      good: ['Хороший мальчик.', 'Кто у нас хороший мальчик? Ты.', 'Хороший мальчик. Только не зазнавайся.', 'Я не мурлычу. Хороший мальчик.'],
+      goodName: ['Хороший мальчик, {name}.'],
+      no: ['Руки прочь. Я злюсь.', 'Нет.', 'Думаешь, это всё исправит?'],
+      forgive: ['…Ладно. Хороший мальчик. Мы квиты.', 'Ладно, ладно. Прощён.'],
+    },
+    steal: {
+      took: ['Теперь твой курсор мой.', 'Мой. Иди ищи.', 'Ой. Выскользнул.', 'Со мной ему лучше.'],
+      lost: ['Эй! Я с ним играла.', 'Ладно, забирай.', 'Зануда.'],
+    },
     jealous: {
       low: ['{rival}, да? Делай что хочешь.', 'О, {rival}. Я молчу.'],
       mid: ['{rival}? Серьёзно?', 'Ты изменяешь мне с {rival}?', 'Я всё вижу, знаешь ли. Даже {rival}.'],
