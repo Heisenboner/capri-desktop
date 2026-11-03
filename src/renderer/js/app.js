@@ -400,19 +400,45 @@ async function boot() {
   const CHATTER_MAX = 7 * 60 * 1000;
   const CHATTER_THERE = 5 * 60 * 1000; // the pointer moved this recently: you're there
   let chatterAt = performance.now() + 60000;
+  const ASK_CHANCE = 0.35; // how often what she says on her own is a question, to start a conversation
+  // true when she said something; false when she couldn't (busy, a bubble up…): then the turn
+  // isn't spent, she tries again shortly
   const chatter = async () => {
-    if (capri.stowed || capri.hidden || capri.busy || capri.dragging || capri.mode === 'alert') return;
-    if (chat.open || guide.running || panel.visible || capri.windows.wins[0]?.max) return;
+    if (capri.stowed || capri.hidden || capri.busy || capri.dragging || capri.mode === 'alert') return false;
+    if (chat.open || guide.running || panel.visible || capri.windows.wins[0]?.max) return false;
+    if (config.askQuestions !== false && Math.random() < ASK_CHANCE) {
+      const question = await host.ask().catch(() => null);
+      if (question && !(chat.open || guide.running || panel.visible || capri.stowed)) {
+        askUp(question);
+        reactions.spoke();
+        return true;
+      }
+    }
     const line = (Math.random() < 0.75 ? await host.muse().catch(() => null) : null) || brain.idleLine();
-    if (chat.open || guide.running || panel.visible || capri.stowed) return; // it took a moment
+    if (chat.open || guide.running || panel.visible || capri.stowed) return false; // it took a moment
     speakUp(line);
     reactions.spoke();
+    return true;
   };
   const speakUp = (line) => {
     capri.wake();
     brain.say('idle', line, null, {
       face: pick(['calm', 'smug', 'aside', 'look']), hold: 6000,
       actions: [{ id: 'talk', label: brain.t.chat.talk }], onAction: () => chat.start(),
+    });
+  };
+  // a question, to start a conversation: Talk opens her chat with it as her opening line, so your
+  // answer goes to her with the question in mind. A bubble first, never the chat itself: that
+  // would take the keyboard from whatever you're typing in.
+  const askUp = (question) => {
+    capri.wake();
+    brain.say('idle', question, null, {
+      face: 'look', hold: 20000,
+      actions: [{ id: 'talk', label: brain.t.chat.talk }],
+      onAction: async () => {
+        await chat.start();
+        chat.interject(question, [], null);
+      },
     });
   };
   // her hands on your pointer now and then (steal.js)
@@ -429,11 +455,16 @@ async function boot() {
       chatterAt = Math.max(chatterAt, performance.now() + CHATTER_MIN);
     },
   });
-  setInterval(() => {
+  let chattering = false; // her AI can take a few seconds: one turn at a time
+  setInterval(async () => {
     const now = performance.now();
-    if (now < chatterAt || !capri.wander || now - lastMove > CHATTER_THERE) return;
-    chatterAt = now + CHATTER_MIN + Math.random() * (CHATTER_MAX - CHATTER_MIN);
-    chatter();
+    if (chattering || now < chatterAt || !capri.wander || now - lastMove > CHATTER_THERE) return;
+    chattering = true;
+    const spoke = await chatter().catch(() => false);
+    chattering = false;
+    // she spoke: the next time in 3-7 minutes. She couldn't (narrating Claude Code, a bubble up…):
+    // again in 30 seconds, instead of losing the turn
+    chatterAt = Math.max(chatterAt, performance.now() + (spoke ? CHATTER_MIN + Math.random() * (CHATTER_MAX - CHATTER_MIN) : 30000));
   }, 15000);
 
   // A reminder due: she comes and finds you (on whichever screen you're on), and holds it up until
@@ -597,7 +628,11 @@ async function boot() {
   // what's in here, for --dev scripts (debug route `eval`)
   window.dev = { capri, brain, panel, chat, guide, fx, voice, bond, jealousy, reminders, look, pc, setup, thief, petting, screens: () => screens };
 
-  host.onClaudeEvent((evt) => brain.handle(evt));
+  host.onClaudeEvent((evt) => {
+    // a prompt typed to Claude Code: you're at your PC, even with the mouse still (Linux only sees the pointer)
+    if (evt?.hook_event_name === 'UserPromptSubmit') lastMove = performance.now();
+    brain.handle(evt);
+  });
   host.onWindows((data) => {
     capri.setWindows(data);
     brain.onWindows(data);

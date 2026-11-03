@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld('host', {
   youtube: (query) => ipcRenderer.invoke('apps:youtube', query),
   play: (query) => ipcRenderer.invoke('apps:play', query),
   muse: (about) => ipcRenderer.invoke('capri:muse', about),
+  ask: () => ipcRenderer.invoke('capri:ask'),
   nowPlaying: () => ipcRenderer.invoke('capri:nowPlaying'),
   wantsSong: (text) => ipcRenderer.invoke('capri:wantsSong', text),
   roblox: (query) => ipcRenderer.invoke('apps:roblox', query),

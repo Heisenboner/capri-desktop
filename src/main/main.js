@@ -92,6 +92,7 @@ function noteEvent(evt) {
 }
 let tray = null;
 let trayMenu = null; // also what she opens when you right-click her
+let menuOnly = false; // no tray icon (config trayIcon: false): the menu still gets built, for right-click and --menu
 let menuOpen = false; // her menu is up: she stays clickable under it
 let wantInteractive = false; // what she asked for meanwhile, for when it closes
 let chatting = false; // her chat has the keyboard: the pointer moving off her doesn't take it away
@@ -378,7 +379,7 @@ function updateConfig(patch) {
 }
 
 function rebuildTray() {
-  if (!tray) return;
+  if (!tray && !menuOnly) return;
   const cfg = config.load();
   const hookState = activeHooks().status();
   const watched = activeAssistant();
@@ -591,7 +592,7 @@ function rebuildTray() {
     { type: 'separator' },
     { label: t.quit, click: () => app.quit() },
   ]);
-  tray.setContextMenu(menu);
+  tray?.setContextMenu(menu);
   trayMenu = menu;
 }
 
@@ -773,11 +774,39 @@ async function pickClaudeFolder() {
 }
 
 function createTray() {
+  // a bar that has her own button (Waybar's Capri pill) needs no tray icon as well
+  if (config.load().trayIcon === false) {
+    menuOnly = true;
+    rebuildTray();
+    return;
+  }
   const icon = nativeImage.createFromPath(path.join(ROOT, 'assets', 'icons', 'tray.png'));
   tray = new Tray(icon);
   tray.setToolTip('Capri');
   tray.on('click', () => sendCommand('status'));
   rebuildTray();
+}
+
+// her menu (the tray's), at the pointer: right-clicking her, or `--menu` (Waybar's Capri pill)
+async function openMenu({ atCursor = false } = {}) {
+  if (!trayMenu || !overlay || menuOpen) return;
+  const at = atCursor ? await cursorPoint().catch(() => null) : null; // the overlay covers the screen from 0,0
+  menuOpen = true;
+  setClickable(true);
+  try {
+    trayMenu.popup({
+    window: overlay,
+      ...(at ? { x: Math.round(at.x), y: Math.round(at.y) } : {}),
+      callback: () => {
+        menuOpen = false;
+        setClickable(wantInteractive);
+      },
+    });
+  } catch (err) {
+    console.error('[capri] menu:', err.message);
+    menuOpen = false;
+    setClickable(wantInteractive);
+  }
 }
 
 // Hyprland: Electron doesn't see the cursor outside its window, so ask Hyprland
@@ -822,11 +851,13 @@ const WANTS_SONG = `You read one chat message and decide if the person is asking
 Give a song when they ask to play, put on, hear, or listen to music, in any language and any wording. Keep what they named, in its own words: an artist alone is fine. If they want music but name nothing, pick one real song that fits what they said: a real artist and title, never a description.
 Give null for anything else: talking about music, opinions on songs, questions, games, volume, pausing, skipping.`;
 
+// her window takes the pointer (on) or lets it through to what's under her (off)
+function setClickable(on) {
+  if (hypr.available && !chatting) hypr.setFocusable(on).catch((err) => console.error('[capri] focus:', err.message));
+  overlay?.setIgnoreMouseEvents(!on, { forward: true });
+}
+
 function registerIpc() {
-  const setClickable = (on) => {
-    if (hypr.available && !chatting) hypr.setFocusable(on).catch((err) => console.error('[capri] focus:', err.message));
-    overlay?.setIgnoreMouseEvents(!on, { forward: true });
-  };
   ipcMain.on('overlay:interactive', (_e, on) => {
     wantInteractive = on;
     if (!menuOpen) setClickable(on); // the pointer going over her menu isn't the pointer leaving her
@@ -879,18 +910,7 @@ function registerIpc() {
   ipcMain.handle('config:set', (_e, patch) => updateConfig(patch));
   ipcMain.handle('demo:window', (_e, open) => demoWindow(open));
   // right-clicking her: the same menu as the tray icon (which Windows often hides behind the ^ by the clock)
-  ipcMain.on('menu:open', () => {
-    if (!trayMenu) return;
-    menuOpen = true;
-    setClickable(true);
-    trayMenu.popup({
-      window: overlay,
-      callback: () => {
-        menuOpen = false;
-        setClickable(wantInteractive);
-      },
-    });
-  });
+  ipcMain.on('menu:open', () => openMenu());
   // her welcome panel's buttons
   ipcMain.handle('hooks:install', () => runHooks('install', { quiet: true }));
   ipcMain.handle('claude:found', () => fs.existsSync(path.dirname(activeHooks().status().file))); // Claude Code keeps its settings there
@@ -1070,6 +1090,28 @@ function registerIpc() {
     const text = await llm.chat(cfg.provider, llmConfig(cfg), { model, messages }, () => {}, AbortSignal.timeout(20000)).catch(() => null);
     const line = String(text || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\[\[[^\]]*\]\]/g, '').trim().replace(/^["“«]+|["”»]+$/g, '');
     return line && line.length <= 160 ? line : null;
+  });
+  // a question she asks you on her own, to start a conversation: one line from her AI, in her persona.
+  // Same privacy as muse: only the app's name and the song go out with it (aware()), unless unticked.
+  ipcMain.handle('capri:ask', async () => {
+    const cfg = config.load();
+    if (cfg.provider === 'claude') return null;
+    if (!chatModels?.length) await refreshModels();
+    const model = pickModel(cfg);
+    if (!model) return null;
+    const persona = [cfg.persona, cfg.userName && `The user's name is ${cfg.userName}.`].filter(Boolean).join('\n') || 'You are Capri, a playful digital construct on my desktop.';
+    const memories = (cfg.memories || []).slice(0, 8).map((m) => `- ${m}`).join('\n');
+    const seeing = cfg.awareChat === false ? '' : await aware();
+    const messages = [
+      { role: 'system', content: [persona, memories && `Things the user asked you to remember:\n${memories}`].filter(Boolean).join('\n\n') },
+      {
+        role: 'user',
+        content: `Nobody asked you anything: you want to talk, so you start a conversation. ${seeing}Ask me one question, under 20 words, in character: about my day, what I'm doing, the song, my plans, or something you remember about me. Something new, not a greeting, and a real question I can answer. Only the question, no quotes, no tags.`,
+      },
+    ];
+    const text = await llm.chat(cfg.provider, llmConfig(cfg), { model, messages }, () => {}, AbortSignal.timeout(20000)).catch(() => null);
+    const line = String(text || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\[\[[^\]]*\]\]/g, '').trim().replace(/^["“«]+|["”»]+$/g, '');
+    return line && line.length <= 200 ? line : null;
   });
   ipcMain.handle('apps:roblox', (_e, query) => launch.roblox(query).catch(() => null));
   // your files (files.js): a search, opening what it found, a screenshot, a search on the web
@@ -1264,7 +1306,11 @@ function main() {
     return;
   }
   // started again: she says how things are; with --toggle (a compositor's key), she folds away or comes back
-  app.on('second-instance', (_e, argv) => (argv.includes('--toggle') ? toggleVisible() : sendCommand('status')));
+  app.on('second-instance', (_e, argv) => {
+    if (argv.includes('--toggle')) toggleVisible();
+    else if (argv.includes('--menu')) openMenu({ atCursor: true });
+    else sendCommand('status');
+  });
   if (process.platform === 'win32') app.setAppUserModelId('capri.desktop');
 
   app.whenReady().then(() => {
@@ -1292,6 +1338,7 @@ function main() {
         overlay?.webContents.send('claude:event', evt);
       },
       onState: herState,
+      onMenu: () => openMenu({ atCursor: true }),
       onDebug: DEV ? debugHandler : null,
     });
     if (hypr.available) {
